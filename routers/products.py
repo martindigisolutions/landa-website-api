@@ -5,32 +5,10 @@ from sqlalchemy import asc, desc
 from schemas import ProductSchema, PaginatedProductResponse
 from models import Product, User
 from database import get_db
-from routers.auth import get_user_by_email_or_phone
-from fastapi.security import OAuth2PasswordBearer
-from jose import jwt, JWTError
 import math
-from config import SECRET_KEY, ALGORITHM
+from routers.auth import get_current_user
+
 router = APIRouter()
-
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/login")
-
-def get_current_user(db: Session = Depends(get_db), token: str = Depends(oauth2_scheme)):
-    credentials_exception = HTTPException(
-        status_code=401,
-        detail="Invalid token",
-        headers={"WWW-Authenticate": "Bearer"},
-    )
-    try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        identifier = payload.get("sub")
-        if not identifier:
-            raise credentials_exception
-    except JWTError:
-        raise credentials_exception
-    user = get_user_by_email_or_phone(db, identifier)
-    if not user:
-        raise credentials_exception
-    return user
 
 @router.get("/products", response_model=PaginatedProductResponse)
 def get_products(

@@ -8,10 +8,12 @@ from models import User
 from schemas import UserCreate, Token
 from database import get_db
 from sqlalchemy import or_
+from fastapi.security import OAuth2PasswordBearer
 from config import SECRET_KEY, ALGORITHM
 
 router = APIRouter()
 
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/login")
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 def get_password_hash(password: str) -> str:
@@ -58,3 +60,21 @@ def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depend
         raise HTTPException(status_code=400, detail="Incorrect email/phone or password")
     access_token = create_access_token(data={"sub": user.email}, expires_delta=timedelta(days=365))
     return {"access_token": access_token, "token_type": "bearer"}
+
+def get_current_user(db: Session = Depends(get_db), token: str = Depends(oauth2_scheme)):
+    credentials_exception = HTTPException(
+        status_code=401,
+        detail="Invalid token",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        identifier = payload.get("sub")
+        if not identifier:
+            raise credentials_exception
+    except JWTError:
+        raise credentials_exception
+    user = get_user_by_email_or_phone(db, identifier)
+    if not user:
+        raise credentials_exception
+    return user
