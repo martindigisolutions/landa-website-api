@@ -25,7 +25,7 @@ Este proyecto expone una API REST con autenticación basada en tokens JWT para a
    pip install -r requirements.txt
    ```
 
-4. Verifica que el archivo de base de datos SQLite (`products.db`) existe, o que se crea con `Base.metadata.create_all()`.
+4. Verifica que el archivo de base de datos SQLite (`api_db.sqlite3`) existe, o que se crea con `Base.metadata.create_all()`.
 
 ## 🚀 Ejecutar el servidor local
 
