@@ -1,5 +1,14 @@
-from sqlalchemy import Column, Integer, String, Float, Boolean, Date
+from sqlalchemy import Column, Integer, String, Boolean, Float, Date
 from database import Base
+
+class User(Base):
+    __tablename__ = "users"
+    id = Column(Integer, primary_key=True, index=True)
+    hashed_password = Column(String)
+    first_name = Column(String)
+    last_name = Column(String)
+    phone = Column(String, unique=True, index=True)
+    email = Column(String, unique=True, index=True)
 
 class Product(Base):
     __tablename__ = "products"
@@ -17,3 +26,5 @@ class Product(Base):
     image_url = Column(String)
     currency = Column(String)
     low_stock_threshold = Column(Integer)
+    has_variants = Column(Boolean, default=False)
+    brand = Column(String)
