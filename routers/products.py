@@ -7,6 +7,7 @@ from models import Product, User
 from database import get_db
 import math
 from routers.auth import get_current_user
+from typing import List
 
 router = APIRouter()
 
@@ -14,7 +15,7 @@ router = APIRouter()
 def get_products(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
-    brand: Optional[str] = Query(None),
+    brand: Optional[List[str]] = Query(None),
     min_price: Optional[float] = Query(None),
     max_price: Optional[float] = Query(None),
     order_by: Optional[str] = Query(None, pattern="^(price|name|stock)$"),
@@ -25,7 +26,7 @@ def get_products(
     query = db.query(Product)
 
     if brand:
-        query = query.filter(Product.brand == brand)
+        query = query.filter(Product.brand.in_(brand))
     if min_price is not None:
         query = query.filter(Product.sale_price != None, Product.sale_price >= min_price)
     if max_price is not None:
