@@ -1,7 +1,7 @@
 from fastapi import FastAPI, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import create_engine, Column, Integer, String, Boolean, Float, Date
+from sqlalchemy import create_engine, Column, Integer, String, Boolean, Float, Date, or_
 from sqlalchemy.orm import declarative_base, sessionmaker, Session
 from jose import JWTError, jwt
 from passlib.context import CryptContext
@@ -36,8 +36,11 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/login")
 class User(Base):
     __tablename__ = "users"
     id = Column(Integer, primary_key=True, index=True)
-    username = Column(String, unique=True, index=True)
     hashed_password = Column(String)
+    first_name = Column(String)
+    last_name = Column(String)
+    phone = Column(String, unique=True, index=True)
+    email = Column(String, unique=True, index=True)
 
 class Product(Base):
     __tablename__ = "products"
@@ -56,8 +59,6 @@ class Product(Base):
     currency = Column(String)
     low_stock_threshold = Column(Integer)
     has_variants = Column(Boolean, default=False)
-
-
 
 Base.metadata.create_all(bind=engine)
 
@@ -82,7 +83,10 @@ class ProductSchema(BaseModel):
         from_attributes = True
 
 class UserCreate(BaseModel):
-    username: str
+    first_name: str
+    last_name: str
+    phone: str
+    email: str
     password: str
 
 class Token(BaseModel):
@@ -98,15 +102,15 @@ def verify_password(plain: str, hashed: str) -> bool:
 
 def create_access_token(data: dict, expires_delta: timedelta = None):
     to_encode = data.copy()
-    expire = datetime.utcnow() + (expires_delta or timedelta(minutes=15))
+    expire = datetime.utcnow() + (expires_delta or timedelta(days=365))
     to_encode.update({"exp": expire})
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
-def get_user(db: Session, username: str):
-    return db.query(User).filter(User.username == username).first()
+def get_user_by_email_or_phone(db: Session, identifier: str):
+    return db.query(User).filter(or_(User.email == identifier, User.phone == identifier)).first()
 
-def authenticate_user(db: Session, username: str, password: str):
-    user = get_user(db, username)
+def authenticate_user(db: Session, identifier: str, password: str):
+    user = get_user_by_email_or_phone(db, identifier)
     if not user or not verify_password(password, user.hashed_password):
         return False
     return user
@@ -119,12 +123,12 @@ def get_current_user(db: Session = Depends(get_db), token: str = Depends(oauth2_
     )
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        username: str = payload.get("sub")
-        if not username:
+        identifier: str = payload.get("sub")
+        if not identifier:
             raise credentials_exception
     except JWTError:
         raise credentials_exception
-    user = get_user(db, username=username)
+    user = get_user_by_email_or_phone(db, identifier)
     if not user:
         raise credentials_exception
     return user
@@ -143,10 +147,16 @@ app.add_middleware(
 
 @app.post("/register", status_code=201)
 def register(user: UserCreate, db: Session = Depends(get_db)):
-    if get_user(db, user.username):
-        raise HTTPException(status_code=400, detail="Username already registered")
+    if get_user_by_email_or_phone(db, user.email) or get_user_by_email_or_phone(db, user.phone):
+        raise HTTPException(status_code=400, detail="Email or phone already registered")
     hashed = get_password_hash(user.password)
-    new_user = User(username=user.username, hashed_password=hashed)
+    new_user = User(
+        first_name=user.first_name,
+        last_name=user.last_name,
+        phone=user.phone,
+        email=user.email,
+        hashed_password=hashed
+    )
     db.add(new_user)
     db.commit()
     return {"msg": "User created successfully"}
@@ -155,8 +165,8 @@ def register(user: UserCreate, db: Session = Depends(get_db)):
 def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
     user = authenticate_user(db, form_data.username, form_data.password)
     if not user:
-        raise HTTPException(status_code=400, detail="Incorrect username or password")
-    access_token = create_access_token(data={"sub": user.username}, expires_delta = timedelta(days=365))
+        raise HTTPException(status_code=400, detail="Incorrect email/phone or password")
+    access_token = create_access_token(data={"sub": user.email}, expires_delta=timedelta(days=365))
     return {"access_token": access_token, "token_type": "bearer"}
 
 @app.get("/products", response_model=List[ProductSchema])
