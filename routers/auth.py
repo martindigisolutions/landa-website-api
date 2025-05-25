@@ -8,12 +8,9 @@ from models import User
 from schemas import UserCreate, Token
 from database import get_db
 from sqlalchemy import or_
+from config import SECRET_KEY, ALGORITHM
 
 router = APIRouter()
-
-SECRET_KEY = "your_secret_key_here"
-ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 60
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 

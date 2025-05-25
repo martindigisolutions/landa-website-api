@@ -9,11 +9,9 @@ from routers.auth import get_user_by_email_or_phone
 from fastapi.security import OAuth2PasswordBearer
 from jose import jwt, JWTError
 import math
-
+from config import SECRET_KEY, ALGORITHM
 router = APIRouter()
 
-SECRET_KEY = "your_secret_key_here"
-ALGORITHM = "HS256"
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/login")
 
 def get_current_user(db: Session = Depends(get_db), token: str = Depends(oauth2_scheme)):
