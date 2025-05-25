@@ -72,7 +72,7 @@ class ProductSchema(BaseModel):
     short_description: Optional[str]
     regular_price: float
     sale_price: float
-    stock: int
+    stock: Optional[int]
     is_in_stock: bool
     restock_date: Optional[datetime]
     is_favorite: bool
@@ -200,7 +200,6 @@ def get_products(
         query = query.filter(Product.brand == brand)
 
     if min_price is not None:
-        print("min not none")
         query = query.filter(Product.sale_price != None, Product.sale_price >= min_price)
         filtered_products = query.all()
         for p in filtered_products:
