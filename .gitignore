@@ -1,0 +1,32 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Local development settings
+*.sqlite3
+*.db
+!api_db.sqlite3
+# Media files
+media/
+data/
+
+# Static files
+staticfiles/
+static/product/images/
+# Virtual environment
+.venv/
+venv/
+env/
+.env
+.venv-camelot
+
+# IDE settings
+.vscode/
+.idea/
+
+# Compiled Python files
+*.pyc
+
+# macOS
+.DS_Store
