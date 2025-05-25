@@ -1,14 +1,15 @@
-from fastapi import FastAPI, Depends, HTTPException, status
+from fastapi import FastAPI, Depends, HTTPException, status, Query
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import create_engine, Column, Integer, String, Boolean, Float, Date, or_
+from sqlalchemy import create_engine, Column, Integer, String, Boolean, Float, Date, or_, asc, desc
 from sqlalchemy.orm import declarative_base, sessionmaker, Session
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 from datetime import datetime, timedelta
-from typing import List, Optional
+from typing import List, Optional, Any
 from pydantic import BaseModel
 from mangum import Mangum
+import math
 
 # -------------------- Config --------------------
 DATABASE_URL = "sqlite:///./api_db.sqlite3"
@@ -59,8 +60,10 @@ class Product(Base):
     currency = Column(String)
     low_stock_threshold = Column(Integer)
     has_variants = Column(Boolean, default=False)
+    brand = Column(String)  # ✅ nuevo campo
 
 Base.metadata.create_all(bind=engine)
+
 
 # -------------------- Schemas --------------------
 class ProductSchema(BaseModel):
@@ -78,9 +81,19 @@ class ProductSchema(BaseModel):
     currency: str
     low_stock_threshold: int
     has_variants: bool
+    brand: Optional[str]  # ✅ nuevo campo
 
     class Config:
         from_attributes = True
+
+
+class PaginatedProductResponse(BaseModel):
+    page: int
+    page_size: int
+    total_items: int
+    total_pages: int
+    sorted_by: str
+    results: List[ProductSchema]
 
 class UserCreate(BaseModel):
     first_name: str
@@ -169,9 +182,54 @@ def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depend
     access_token = create_access_token(data={"sub": user.email}, expires_delta=timedelta(days=365))
     return {"access_token": access_token, "token_type": "bearer"}
 
-@app.get("/products", response_model=List[ProductSchema])
-def get_products(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    return db.query(Product).all()
+@app.get("/products", response_model=PaginatedProductResponse)
+def get_products(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    brand: Optional[str] = Query(None),
+    min_price: Optional[float] = Query(None),
+    max_price: Optional[float] = Query(None),
+    order_by: Optional[str] = Query(None, regex="^(price|name|stock)$"),
+    direction: Optional[str] = Query("asc", regex="^(asc|desc)$"),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100)
+):
+    query = db.query(Product)
+
+    if brand:
+        query = query.filter(Product.brand == brand)
+
+    if min_price is not None:
+        print("min not none")
+        query = query.filter(Product.sale_price != None, Product.sale_price >= min_price)
+        filtered_products = query.all()
+        for p in filtered_products:
+            print(p.id, p.name, p.sale_price)
+    if max_price is not None:
+        query = query.filter(Product.sale_price != None, Product.sale_price <= max_price)
+
+
+    if order_by:
+        sort_column = {
+            "price": Product.sale_price,
+            "name": Product.name,
+            "stock": Product.stock
+        }.get(order_by)
+        query = query.order_by(asc(sort_column) if direction == "asc" else desc(sort_column))
+
+    total_items = query.count()
+    total_pages = math.ceil(total_items / page_size)
+    offset = (page - 1) * page_size
+    results = query.offset(offset).limit(page_size).all()
+
+    return {
+        "page": page,
+        "page_size": page_size,
+        "total_items": total_items,
+        "total_pages": total_pages,
+        "sorted_by": f"{order_by}_{direction}" if order_by else "",
+        "results": results
+    }
 
 # -------------------- Lambda handler --------------------
 handler = Mangum(app)
