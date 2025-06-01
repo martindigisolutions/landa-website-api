@@ -1,15 +1,17 @@
-from fastapi import Depends, HTTPException, APIRouter, status
-from fastapi.security import OAuth2PasswordRequestForm
+from fastapi import Depends, HTTPException, APIRouter, status, Body
+from fastapi.security import OAuth2PasswordRequestForm, OAuth2PasswordBearer
 from sqlalchemy.orm import Session
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 from datetime import datetime, timedelta
-from models import User
-from schemas import UserCreate, Token, UserUpdate
-from database import get_db
 from sqlalchemy import or_
-from fastapi.security import OAuth2PasswordBearer
-from config import SECRET_KEY, ALGORITHM
+
+from models import User
+from schemas import UserCreate, Token, UserUpdate, ResetPasswordSchema
+from database import get_db
+from config import SECRET_KEY, ALGORITHM, FRONTEND_RESET_URL
+from utils import send_email
+from security import create_reset_token, verify_reset_token
 
 router = APIRouter()
 
@@ -95,3 +97,43 @@ def get_current_user(db: Session = Depends(get_db), token: str = Depends(oauth2_
     if not user:
         raise credentials_exception
     return user
+
+@router.post("/forgot-password")
+def forgot_password(email: str = Body(..., embed=True), db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.email == email).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    token = create_reset_token({"user_id": user.id})
+    reset_link = f"{FRONTEND_RESET_URL}{token}"
+    html_body = f"""
+        <html>
+        <body>
+            <p>Hello,</p>
+            <p>You requested a password reset. Click the link below to reset your password:</p>
+            <p><a href="{reset_link}">Reset Password</a></p>
+            <p>If you did not request this, please ignore this email.</p>
+        </body>
+        </html>
+        """
+    send_email(email, "Password Reset", html_body)                                                              
+    return {"msg": "Reset link sent"}
+
+@router.post("/reset-password")
+def reset_password(data: ResetPasswordSchema, db: Session = Depends(get_db)):
+    try:
+        payload = jwt.decode(data.token, SECRET_KEY, algorithms=[ALGORITHM])
+        user_id = payload.get("user_id")
+        if user_id is None:
+            raise HTTPException(status_code=400, detail="Invalid token")
+    except JWTError:
+        raise HTTPException(status_code=400, detail="Invalid or expired token")
+
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    user.hashed_password = get_password_hash(data.new_password)
+    db.commit()
+
+    return {"msg": "Password reset successful"}

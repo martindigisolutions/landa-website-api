@@ -8,3 +8,4 @@ mangum
 python-multipart
 alembic
 pydantic[email]
+python-dotenv

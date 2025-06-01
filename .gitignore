@@ -19,6 +19,8 @@ static/product/images/
 venv/
 env/
 .env
+.env.dev
+
 .venv-camelot
 
 # IDE settings
