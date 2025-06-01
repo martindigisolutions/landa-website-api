@@ -9,7 +9,7 @@ from fastapi.security import OAuth2PasswordBearer
 from database import get_db
 from models import User, PasswordResetRequest
 from schemas import UserCreate, UserUpdate, ResetPasswordSchema
-from config import SECRET_KEY, ALGORITHM, FRONTEND_RESET_URL
+from config import SECRET_KEY, ALGORITHM, FRONTEND_RESET_URL, PASSWORD_RESET_MAX_REQUESTS_PER_HOUR
 from utils import send_email
 from security import create_reset_token
 
@@ -100,15 +100,18 @@ def request_password_reset(email: str, db: Session):
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
+    # Count recent reset attempts within the past hour
     one_hour_ago = datetime.utcnow() - timedelta(hours=1)
-    recent_request = db.query(PasswordResetRequest).filter(
+    recent_attempts = db.query(PasswordResetRequest).filter(
         PasswordResetRequest.user_id == user.id,
         PasswordResetRequest.created_at >= one_hour_ago
-    ).first()
+    ).count()
 
-    if recent_request:
-        raise HTTPException(status_code=429, detail="You can request a new password reset only once per hour.")
-
+    if recent_attempts >= PASSWORD_RESET_MAX_REQUESTS_PER_HOUR:
+        raise HTTPException(
+            status_code=429,
+            detail=f"You can request a password reset only {PASSWORD_RESET_MAX_REQUESTS_PER_HOUR} times per hour."
+        )
     db.query(PasswordResetRequest).filter(
         PasswordResetRequest.user_id == user.id,
         PasswordResetRequest.used == False
