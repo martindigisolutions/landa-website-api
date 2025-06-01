@@ -41,17 +41,21 @@ def authenticate_user(db: Session, identifier: str, password: str):
 def register(user: UserCreate, db: Session = Depends(get_db)):
     if get_user_by_email_or_phone(db, user.email) or get_user_by_email_or_phone(db, user.phone):
         raise HTTPException(status_code=400, detail="Email or phone already registered")
+    
     hashed = get_password_hash(user.password)
     new_user = User(
         first_name=user.first_name,
         last_name=user.last_name,
         phone=user.phone,
         email=user.email,
+        birthdate=user.birthdate,
+        user_type=user.user_type,
         hashed_password=hashed
     )
     db.add(new_user)
     db.commit()
     return {"msg": "User created successfully"}
+
 
 @router.post("/login", response_model=Token)
 def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):

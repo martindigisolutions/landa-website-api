@@ -1,6 +1,7 @@
-from pydantic import BaseModel
-from typing import Optional, List
+from pydantic import BaseModel, EmailStr
+from typing import Optional, List, Literal
 from datetime import datetime
+from datetime import date
 
 class ProductSchema(BaseModel):
     id: int
@@ -34,8 +35,10 @@ class UserCreate(BaseModel):
     first_name: str
     last_name: str
     phone: str
-    email: str
+    email: EmailStr
     password: str
+    birthdate: date
+    user_type: Literal["client", "stylist"]
 
 class Token(BaseModel):
     access_token: str

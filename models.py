@@ -10,6 +10,9 @@ class User(Base):
     phone = Column(String, unique=True, index=True)
     email = Column(String, unique=True, index=True)
 
+    birthdate = Column(Date, nullable=True)
+    user_type = Column(String, nullable=False, default="client")  # valores: "stylist", "client"
+
 class Product(Base):
     __tablename__ = "products"
 

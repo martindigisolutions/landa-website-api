@@ -6,3 +6,5 @@ passlib[bcrypt]
 pydantic
 mangum
 python-multipart
+alembic
+pydantic[email]
