@@ -11,7 +11,12 @@ from typing import List
 
 router = APIRouter()
 
-@router.get("/products", response_model=PaginatedProductResponse)
+@router.get(
+    "/products",
+    summary="List products",
+    description="Returns a paginated list of products with optional filters and sorting.",
+    response_model=PaginatedProductResponse
+)
 def get_products(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
@@ -56,7 +61,12 @@ def get_products(
     }
 
 
-@router.get("/products/{product_id}", response_model=ProductSchema)
+@router.get(
+    "/products/{product_id}",
+    summary="Get product by ID",
+    description="Returns the details of a single product by its ID.",
+    response_model=ProductSchema
+)
 def get_product_by_id(
     product_id: int,
     current_user: User = Depends(get_current_user),

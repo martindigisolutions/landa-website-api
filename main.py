@@ -23,5 +23,9 @@ Base.metadata.create_all(bind=engine)
 app.include_router(auth.router)
 app.include_router(products.router)
 
+# Include routers with tags for Swagger grouping
+app.include_router(auth.router, tags=["Authentication"])
+app.include_router(products.router, tags=["Products"])
+
 # Lambda handler
 handler = Mangum(app)

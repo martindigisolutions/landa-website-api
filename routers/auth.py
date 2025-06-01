@@ -39,7 +39,12 @@ def authenticate_user(db: Session, identifier: str, password: str):
         return False
     return user
 
-@router.post("/register", status_code=201)
+@router.post(
+    "/register",
+    summary="Register new user",
+    description="Creates a new user account with email, phone, and password.",\
+    status_code=201
+)
 def register(user: UserCreate, db: Session = Depends(get_db)):
     if get_user_by_email_or_phone(db, user.email) or get_user_by_email_or_phone(db, user.phone):
         raise HTTPException(status_code=400, detail="Email or phone already registered")
@@ -58,7 +63,11 @@ def register(user: UserCreate, db: Session = Depends(get_db)):
     db.commit()
     return {"msg": "User created successfully"}
 
-@router.patch("/users/{user_id}")
+@router.patch(
+    "/users/{user_id}",
+    summary="Update user profile",
+    description="Updates user fields like name, phone, email, birthdate, or user type. Only fields provided in the request will be updated."
+)
 def update_user(user_id: int, updates: UserUpdate, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
@@ -72,7 +81,12 @@ def update_user(user_id: int, updates: UserUpdate, db: Session = Depends(get_db)
     db.refresh(user)
     return {"msg": "User updated successfully", "user": update_data}
 
-@router.post("/login", response_model=Token)
+@router.post(
+    "/login",
+    summary="User login",
+    description="Authenticates user by email/phone and password. Returns access token.",
+    response_model=Token,
+)
 def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
     user = authenticate_user(db, form_data.username, form_data.password)
     if not user:
@@ -98,7 +112,11 @@ def get_current_user(db: Session = Depends(get_db), token: str = Depends(oauth2_
         raise credentials_exception
     return user
 
-@router.post("/forgot-password")
+@router.post(
+    "/forgot-password",
+    summary="Request password reset",
+    description="Sends a password reset email with a token link. Limit one request per hour."
+)
 def forgot_password(email: str = Body(..., embed=True), db: Session = Depends(get_db)):
     user = db.query(User).filter(User.email == email).first()
     if not user:
@@ -144,7 +162,11 @@ def forgot_password(email: str = Body(..., embed=True), db: Session = Depends(ge
 
     return {"msg": "Reset link sent"}
 
-@router.post("/reset-password")
+@router.post(
+    "/reset-password",
+    summary="Reset user password",
+    description="Resets the user's password using a valid token received via email."
+)
 def reset_password(data: ResetPasswordSchema, db: Session = Depends(get_db)):
     # 1. Decode JWT token
     try:
