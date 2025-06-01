@@ -1,17 +1,22 @@
-from sqlalchemy import Column, Integer, String, Boolean, Float, Date
+from sqlalchemy import Column, Integer, String, Boolean, Float, Date, DateTime, ForeignKey
+from sqlalchemy.orm import relationship
+from datetime import datetime
 from database import Base
 
 class User(Base):
     __tablename__ = "users"
-    id = Column(Integer, primary_key=True, index=True)
-    hashed_password = Column(String)
-    first_name = Column(String)
-    last_name = Column(String)
-    phone = Column(String, unique=True, index=True)
-    email = Column(String, unique=True, index=True)
 
+    id = Column(Integer, primary_key=True, index=True)
+    hashed_password = Column(String, nullable=False)
+    first_name = Column(String, nullable=False)
+    last_name = Column(String, nullable=False)
+    phone = Column(String, unique=True, index=True, nullable=False)
+    email = Column(String, unique=True, index=True, nullable=False)
     birthdate = Column(Date, nullable=True)
-    user_type = Column(String, nullable=False, default="client")  # valores: "stylist", "client"
+    user_type = Column(String, nullable=False, default="client")  # values: "stylist", "client"
+
+    # Relationship to password reset requests
+    password_reset_requests = relationship("PasswordResetRequest", back_populates="user")
 
 class Product(Base):
     __tablename__ = "products"
@@ -31,3 +36,14 @@ class Product(Base):
     low_stock_threshold = Column(Integer)
     has_variants = Column(Boolean, default=False)
     brand = Column(String)
+
+class PasswordResetRequest(Base):
+    __tablename__ = "password_reset_requests"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    token = Column(String, unique=True, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    used = Column(Boolean, default=False)
+
+    user = relationship("User", back_populates="password_reset_requests")

@@ -6,7 +6,7 @@ from passlib.context import CryptContext
 from datetime import datetime, timedelta
 from sqlalchemy import or_
 
-from models import User
+from models import User,PasswordResetRequest
 from schemas import UserCreate, Token, UserUpdate, ResetPasswordSchema
 from database import get_db
 from config import SECRET_KEY, ALGORITHM, FRONTEND_RESET_URL
@@ -103,9 +103,33 @@ def forgot_password(email: str = Body(..., embed=True), db: Session = Depends(ge
     user = db.query(User).filter(User.email == email).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
-    
+
+    # Check for recent request (within the last hour)
+    one_hour_ago = datetime.utcnow() - timedelta(hours=1)
+    recent_request = db.query(PasswordResetRequest).filter(
+        PasswordResetRequest.user_id == user.id,
+        PasswordResetRequest.created_at >= one_hour_ago
+    ).first()
+
+    if recent_request:
+        raise HTTPException(status_code=429, detail="You can request a new password reset only once per hour.")
+
+    # Invalidate old tokens
+    db.query(PasswordResetRequest).filter(
+        PasswordResetRequest.user_id == user.id,
+        PasswordResetRequest.used == False
+    ).update({"used": True})
+
+    # Generate new token
     token = create_reset_token({"user_id": user.id})
     reset_link = f"{FRONTEND_RESET_URL}{token}"
+
+    # Save reset request
+    request = PasswordResetRequest(user_id=user.id, token=token)
+    db.add(request)
+    db.commit()
+
+    # Email content
     html_body = f"""
         <html>
         <body>
@@ -115,25 +139,46 @@ def forgot_password(email: str = Body(..., embed=True), db: Session = Depends(ge
             <p>If you did not request this, please ignore this email.</p>
         </body>
         </html>
-        """
-    send_email(email, "Password Reset", html_body)                                                              
+    """
+    send_email(email, "Password Reset", html_body)
+
     return {"msg": "Reset link sent"}
 
 @router.post("/reset-password")
 def reset_password(data: ResetPasswordSchema, db: Session = Depends(get_db)):
+    # 1. Decode JWT token
     try:
         payload = jwt.decode(data.token, SECRET_KEY, algorithms=[ALGORITHM])
         user_id = payload.get("user_id")
-        if user_id is None:
+        exp_timestamp = payload.get("exp")
+        if user_id is None or exp_timestamp is None:
             raise HTTPException(status_code=400, detail="Invalid token")
     except JWTError:
         raise HTTPException(status_code=400, detail="Invalid or expired token")
 
+    # 2. Verify token in DB (must exist and be unused)
+    reset_entry = db.query(PasswordResetRequest).filter_by(token=data.token).first()
+    if not reset_entry or reset_entry.used:
+        raise HTTPException(status_code=400, detail="This reset link is invalid or already used.")
+
+    # 3. Check expiration manually
+    print(exp_timestamp, datetime.utcnow().timestamp())
+    if datetime.utcnow().timestamp() > exp_timestamp:
+        raise HTTPException(status_code=400, detail="Token has expired.")
+
+    # 4. Get the user
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
+    # 5. Update password
     user.hashed_password = get_password_hash(data.new_password)
+    db.add(user)
+
+    # 6. Mark token as used
+    reset_entry.used = True
+    db.add(reset_entry)
+
     db.commit()
 
     return {"msg": "Password reset successful"}
