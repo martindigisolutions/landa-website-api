@@ -54,3 +54,15 @@ def get_products(
         "sorted_by": f"{order_by}_{direction}" if order_by else "",
         "results": results
     }
+
+
+@router.get("/products/{product_id}", response_model=ProductSchema)
+def get_product_by_id(
+    product_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    product = db.query(Product).filter(Product.id == product_id).first()
+    if not product:
+        raise HTTPException(status_code=404, detail="Product not found")
+    return product
