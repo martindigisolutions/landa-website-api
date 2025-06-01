@@ -5,7 +5,7 @@ from jose import JWTError, jwt
 from passlib.context import CryptContext
 from datetime import datetime, timedelta
 from models import User
-from schemas import UserCreate, Token
+from schemas import UserCreate, Token, UserUpdate
 from database import get_db
 from sqlalchemy import or_
 from fastapi.security import OAuth2PasswordBearer
@@ -56,6 +56,19 @@ def register(user: UserCreate, db: Session = Depends(get_db)):
     db.commit()
     return {"msg": "User created successfully"}
 
+@router.patch("/users/{user_id}")
+def update_user(user_id: int, updates: UserUpdate, db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    update_data = updates.dict(exclude_unset=True)
+    for field, value in update_data.items():
+        setattr(user, field, value)
+
+    db.commit()
+    db.refresh(user)
+    return {"msg": "User updated successfully", "user": update_data}
 
 @router.post("/login", response_model=Token)
 def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):

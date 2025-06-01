@@ -40,6 +40,15 @@ class UserCreate(BaseModel):
     birthdate: date
     user_type: Literal["client", "stylist"]
 
+class UserUpdate(BaseModel):
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+    phone: Optional[str] = None
+    email: Optional[EmailStr] = None
+    password: Optional[str] = None
+    birthdate: Optional[date] = None
+    user_type: Optional[Literal["client", "stylist"]] = None
+
 class Token(BaseModel):
     access_token: str
     token_type: str
