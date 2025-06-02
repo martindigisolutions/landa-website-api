@@ -91,7 +91,7 @@ def update_user_profile(user_id: int, updates: UserUpdate, db: Session):
 def login_user(form_data, db: Session):
     user = authenticate_user(db, form_data.username, form_data.password)
     if not user:
-        raise HTTPException(status_code=400, detail="Incorrect email/phone or password")
+        raise HTTPException(status_code=401, detail="Incorrect email/phone or password")
     access_token = create_access_token(data={"sub": user.email}, expires_delta=timedelta(days=365))
     return {"access_token": access_token, "token_type": "bearer"}
 
