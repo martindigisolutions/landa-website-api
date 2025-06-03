@@ -6,6 +6,7 @@ from schemas import ProductSchema, PaginatedProductResponse
 from models import Product, User
 from database import get_db
 from services import product_service, auth_service
+from services.product_service import get_brands
 
 router = APIRouter()
 
@@ -50,3 +51,15 @@ def get_product_by_id(
     db: Session = Depends(get_db)
 ):
     return product_service.get_product_by_id(product_id, db)
+
+@router.get(
+    "/brands",
+    summary="Get list of available brands",
+    description="Returns a list of unique product brands available in the catalog, ordered alphabetically.",
+    response_model=List[str]
+)
+def get_brands(
+    current_user: User = Depends(auth_service.get_current_user),
+    db: Session = Depends(get_db)
+):
+    return product_service.get_brands(db)

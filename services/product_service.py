@@ -51,3 +51,13 @@ def get_product_by_id(product_id: int, db: Session):
     if not product:
         raise Exception("Product not found")
     return product
+
+def get_brands(db: Session):
+    brands = (
+        db.query(Product.brand)
+        .filter(Product.brand.isnot(None))
+        .distinct()
+        .order_by(asc(Product.brand))
+        .all()
+    )
+    return [b[0] for b in brands]
