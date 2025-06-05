@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Boolean, Float, Date, DateTime, ForeignKey
+from sqlalchemy import Column, Integer, String, Boolean, Float, Date, DateTime, ForeignKey, func
 from sqlalchemy.orm import relationship
 from datetime import datetime
 from database import Base
@@ -14,6 +14,7 @@ class User(Base):
     email = Column(String, unique=True, index=True, nullable=False)
     birthdate = Column(Date, nullable=True)
     user_type = Column(String, nullable=False, default="client")  # values: "stylist", "client"
+    created_at = Column(DateTime, default=datetime.utcnow)
 
     # Relationship to password reset requests
     password_reset_requests = relationship("PasswordResetRequest", back_populates="user")

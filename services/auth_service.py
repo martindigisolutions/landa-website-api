@@ -92,8 +92,22 @@ def login_user(form_data, db: Session):
     user = authenticate_user(db, form_data.username, form_data.password)
     if not user:
         raise HTTPException(status_code=401, detail="Incorrect email/phone or password")
+
     access_token = create_access_token(data={"sub": user.email}, expires_delta=timedelta(days=365))
-    return {"access_token": access_token, "token_type": "bearer"}
+
+    return {
+        "access_token": access_token,
+        "token_type": "bearer",
+        "user": {
+            "id": user.id,
+            "first_name": user.first_name,
+            "last_name": user.last_name,
+            "email": user.email,
+            "phone": user.phone,
+            "user_type": user.user_type
+        }
+    }
+
 
 def request_password_reset(email: str, db: Session):
     user = db.query(User).filter(User.email == email).first()
@@ -168,3 +182,16 @@ def reset_password(data: ResetPasswordSchema, db: Session):
     db.commit()
 
     return {"msg": "Password reset successful"}
+
+def get_user_by_id(user_id: int, current_user: User, db: Session):
+    if current_user.user_type != "admin" and current_user.id != user_id:
+        raise HTTPException(
+            status_code=403, detail="You are not authorized to access this user's information."
+        )
+
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    return user
+
