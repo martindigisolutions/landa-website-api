@@ -7,6 +7,7 @@ from datetime import datetime, date
 class BaseProduct(BaseModel):
     name: str
     short_description: Optional[str]
+    description: Optional[str]
     regular_price: float
     sale_price: float
     stock: Optional[int]
