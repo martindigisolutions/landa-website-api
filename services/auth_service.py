@@ -8,7 +8,7 @@ from fastapi.security import OAuth2PasswordBearer
 
 from database import get_db
 from models import User, PasswordResetRequest
-from schemas import UserCreate, UserUpdate, ResetPasswordSchema
+from schemas.auth import UserCreate, UserUpdate, ResetPasswordSchema
 from config import SECRET_KEY, ALGORITHM, FRONTEND_RESET_URL, PASSWORD_RESET_MAX_REQUESTS_PER_HOUR
 from utils import send_email
 from security import create_reset_token

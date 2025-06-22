@@ -49,3 +49,36 @@ class PasswordResetRequest(Base):
     used = Column(Boolean, default=False)
 
     user = relationship("User", back_populates="password_reset_requests")
+
+from sqlalchemy import Column, Integer, String, Float, DateTime, ForeignKey, Boolean, JSON
+from sqlalchemy.orm import relationship
+from datetime import datetime
+from database import Base
+
+class Order(Base):
+    __tablename__ = "orders"
+
+    id = Column(Integer, primary_key=True, index=True)
+    session_id = Column(String, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    shipping_method = Column(String)  # "pickup" o "delivery"
+    payment_method = Column(String)   # "zelle", "credit_card", etc.
+    address = Column(JSON, nullable=True)  # Guardamos JSON de dirección
+    status = Column(String, default="pending")  # pending, paid, canceled, etc.
+    total = Column(Float)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    user = relationship("User")
+    items = relationship("OrderItem", back_populates="order")
+
+class OrderItem(Base):
+    __tablename__ = "order_items"
+
+    id = Column(Integer, primary_key=True, index=True)
+    order_id = Column(Integer, ForeignKey("orders.id"))
+    product_id = Column(Integer, ForeignKey("products.id"))
+    quantity = Column(Integer)
+    price = Column(Float)  # Precio congelado en el momento de la compra
+
+    order = relationship("Order", back_populates="items")
+    product = relationship("Product")

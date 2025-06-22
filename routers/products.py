@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from typing import Optional, List
 from sqlalchemy import asc, desc
-from schemas import ProductSchema, PaginatedProductResponse
+from schemas.product import ProductSchema, PaginatedProductResponse
 from models import Product, User
 from database import get_db
 from services import product_service, auth_service
