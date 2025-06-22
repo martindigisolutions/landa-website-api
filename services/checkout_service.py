@@ -120,3 +120,35 @@ def confirm_manual_payment(data: ConfirmManualPayment, db: Session):
     db.commit()
 
     return {"status": "awaiting_verification"}
+
+def get_payment_details(order_id: str, db: Session):
+    order = db.query(Order).filter(Order.id == order_id).first()
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+
+    total = f"${order.total:.2f}"
+    if order.payment_method == "zelle":
+        html = f"""
+        <p>Tu orden <strong>#{order_id}</strong> ha sido creada.<br>
+        Envíe su pago de <strong>{total}</strong> a través de <strong>Zelle</strong> al número:<br>
+        <strong>555-123-4567</strong><br>
+        En las notas, escriba: <strong>Order {order_id}</strong></p>
+        """
+        return {"payment_type": "zelle", "instructions": html.strip()}
+
+    if order.payment_method == "cashapp":
+        html = f"""
+        <p>Tu orden <strong>#{order_id}</strong> ha sido creada.<br>
+        Envíe su pago de <strong>{total}</strong> a través de <strong>CashApp</strong> al usuario:<br>
+        <strong>$beautystore</strong><br>
+        En las notas, escriba: <strong>Order {order_id}</strong></p>
+        """
+        return {"payment_type": "cashapp", "instructions": html.strip()}
+
+    if order.payment_method == "cash":
+        return {
+            "payment_type": "cash",
+            "instructions": "<p>Tu orden ha sido creada.<br>Recoge tu pedido y paga en efectivo en tienda.</p>"
+        }
+
+    raise HTTPException(status_code=400, detail="No instructions available for this method")

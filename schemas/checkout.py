@@ -30,3 +30,7 @@ class OrderCreate(BaseModel):
 
 class ConfirmManualPayment(BaseModel):
     order_id: str
+
+class PaymentDetailsResponse(BaseModel):
+    payment_type: str
+    instructions: str

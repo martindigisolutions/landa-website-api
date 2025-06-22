@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from database import get_db
 from services import checkout_service
-from schemas.checkout import CheckoutSessionCreate, CheckoutOptionsRequest, OrderCreate, ConfirmManualPayment
+from schemas.checkout import CheckoutSessionCreate, CheckoutOptionsRequest, OrderCreate, ConfirmManualPayment, PaymentDetailsResponse
 
 router = APIRouter(prefix="/checkout", tags=["Checkout"])
 
@@ -21,3 +21,7 @@ def create_order(data: OrderCreate, db: Session = Depends(get_db)):
 @router.post("/order/confirm-manual-payment", summary="Confirmar pago manual")
 def confirm_manual_payment(data: ConfirmManualPayment, db: Session = Depends(get_db)):
     return checkout_service.confirm_manual_payment(data, db)
+
+@router.get("/order/{order_id}/payment-details", response_model=PaymentDetailsResponse)
+def get_payment_details(order_id: str, db: Session = Depends(get_db)):
+    return checkout_service.get_payment_details(order_id, db)
