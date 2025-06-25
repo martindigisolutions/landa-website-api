@@ -98,7 +98,7 @@ def create_order(data: OrderCreate, db: Session):
     db.commit()
 
     return {
-        "order_id": f"order.id",
+        "order_id": f"{order.id}",
         "status": "pending_payment"
     }
 
