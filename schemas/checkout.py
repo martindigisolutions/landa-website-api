@@ -1,5 +1,6 @@
 from pydantic import BaseModel
 from typing import List, Optional
+from datetime import datetime
 
 class ProductInCart(BaseModel):
     product_id: int
@@ -34,3 +35,14 @@ class ConfirmManualPayment(BaseModel):
 class PaymentDetailsResponse(BaseModel):
     payment_type: str
     instructions: str
+
+class OrderSummary(BaseModel):
+    id: int
+    status: str
+    payment_method: str
+    shipping_method: str
+    total: float
+    created_at: datetime
+
+    class Config:
+        from_attributes = True

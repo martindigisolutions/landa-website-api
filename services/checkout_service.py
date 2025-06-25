@@ -3,6 +3,7 @@ from fastapi import HTTPException
 from models import Product, Order, OrderItem
 from schemas.checkout import CheckoutSessionCreate, CheckoutOptionsRequest, OrderCreate, ConfirmManualPayment
 from uuid import uuid4
+from typing import Optional
 
 def start_checkout_session(data: CheckoutSessionCreate, db: Session):
     for item in data.products:
@@ -152,3 +153,9 @@ def get_payment_details(order_id: str, db: Session):
         }
 
     raise HTTPException(status_code=400, detail="No instructions available for this method")
+
+def get_order_list(db: Session, user_id: Optional[int] = None):
+    query = db.query(Order)
+    if user_id:
+        query = query.filter(Order.user_id == user_id)
+    return query.order_by(Order.created_at.desc()).all()

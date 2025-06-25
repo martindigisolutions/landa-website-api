@@ -3,6 +3,8 @@ from sqlalchemy.orm import Session
 from database import get_db
 from services import checkout_service
 from schemas.checkout import CheckoutSessionCreate, CheckoutOptionsRequest, OrderCreate, ConfirmManualPayment, PaymentDetailsResponse
+from typing import List, Optional
+from schemas.checkout import OrderSummary
 
 router = APIRouter(prefix="/checkout", tags=["Checkout"])
 
@@ -25,3 +27,7 @@ def confirm_manual_payment(data: ConfirmManualPayment, db: Session = Depends(get
 @router.get("/order/{order_id}/payment-details", response_model=PaymentDetailsResponse)
 def get_payment_details(order_id: str, db: Session = Depends(get_db)):
     return checkout_service.get_payment_details(order_id, db)
+
+@router.get("/orders", response_model=List[OrderSummary])
+def list_orders(user_id: Optional[int] = None, db: Session = Depends(get_db)):
+    return checkout_service.get_order_list(db, user_id)
