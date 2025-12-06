@@ -62,11 +62,16 @@ class Order(Base):
     session_id = Column(String, index=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     shipping_method = Column(String)  # "pickup" o "delivery"
-    payment_method = Column(String)   # "zelle", "credit_card", etc.
+    payment_method = Column(String)   # "zelle", "stripe", "credit_card", etc.
     address = Column(JSON, nullable=True)  # Guardamos JSON de dirección
-    status = Column(String, default="pending")  # pending, paid, canceled, etc.
+    status = Column(String, default="pending")  # pending, paid, canceled, refunded, etc.
     total = Column(Float)
     created_at = Column(DateTime, default=datetime.utcnow)
+    
+    # Stripe payment fields
+    stripe_payment_intent_id = Column(String, nullable=True, index=True)
+    payment_status = Column(String, default="pending")  # pending, processing, completed, failed, refunded
+    paid_at = Column(DateTime, nullable=True)
 
     user = relationship("User")
     items = relationship("OrderItem", back_populates="order")

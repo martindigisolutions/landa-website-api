@@ -34,7 +34,11 @@ class ConfirmManualPayment(BaseModel):
 
 class PaymentDetailsResponse(BaseModel):
     payment_type: str
-    instructions: str
+    instructions: Optional[str] = None
+    # Campos adicionales para Stripe
+    order_id: Optional[str] = None
+    total: Optional[float] = None
+    requires_payment_intent: Optional[bool] = None
 
 class OrderSummary(BaseModel):
     id: int

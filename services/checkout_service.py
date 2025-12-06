@@ -38,8 +38,8 @@ def get_checkout_options(data: CheckoutOptionsRequest, db: Session):
     ]
 
     payment_methods = [
+        {"id": "stripe", "label": "Credit/Debit Card"},
         {"id": "zelle", "label": "Zelle (0% Fee)"},
-        {"id": "credit_card", "label": "Tarjeta de crédito (2% Fee)"}
     ]
 
     if data.shipping_method == "pickup":
@@ -62,7 +62,7 @@ def get_checkout_options(data: CheckoutOptionsRequest, db: Session):
     }
 
 def create_order(data: OrderCreate, db: Session):
-    valid_methods = ["zelle", "cashapp", "venmo", "credit_card", "cash"]
+    valid_methods = ["stripe", "zelle", "cashapp", "venmo", "credit_card", "cash"]
     if data.payment_method not in valid_methods:
         raise HTTPException(status_code=400, detail="Invalid payment method")
 
@@ -150,6 +150,15 @@ def get_payment_details(order_id: str, db: Session):
         return {
             "payment_type": "cash",
             "instructions": "<p>Tu orden ha sido creada.<br>Recoge tu pedido y paga en efectivo en tienda.</p>"
+        }
+
+    if order.payment_method == "stripe":
+        return {
+            "payment_type": "stripe",
+            "instructions": None,
+            "order_id": str(order.id),
+            "total": order.total,
+            "requires_payment_intent": True
         }
 
     raise HTTPException(status_code=400, detail="No instructions available for this method")

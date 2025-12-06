@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from routers import auth, products, checkout_router
+from routers import auth, products, checkout_router, stripe_router
 from database import Base, engine
 from mangum import Mangum
 
@@ -23,11 +23,7 @@ Base.metadata.create_all(bind=engine)
 app.include_router(auth.router)
 app.include_router(products.router)
 app.include_router(checkout_router.router)
-
-# Include routers with tags for Swagger grouping
-app.include_router(auth.router, tags=["Authentication"])
-app.include_router(products.router, tags=["Products"])
-app.include_router(checkout_router.router, tags=["Checkout"])
+app.include_router(stripe_router.router)
 
 # Lambda handler
 handler = Mangum(app)
