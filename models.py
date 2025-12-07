@@ -87,3 +87,18 @@ class OrderItem(Base):
 
     order = relationship("Order", back_populates="items")
     product = relationship("Product")
+
+
+class Application(Base):
+    """OAuth2 Client Application for external dashboards/services"""
+    __tablename__ = "applications"
+
+    id = Column(Integer, primary_key=True, index=True)
+    client_id = Column(String, unique=True, index=True, nullable=False)
+    client_secret_hash = Column(String, nullable=False)
+    name = Column(String, nullable=False)
+    description = Column(String, nullable=True)
+    scopes = Column(JSON, default=list)  # ["products:read", "products:write", "orders:read", etc.]
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    last_used_at = Column(DateTime, nullable=True)

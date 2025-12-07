@@ -7,6 +7,9 @@ __pycache__/
 *.sqlite3
 *.db
 !api_db.sqlite3
+
+# Credentials (never commit these!)
+credentials.json
 # Media files
 media/
 data/
