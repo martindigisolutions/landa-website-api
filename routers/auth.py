@@ -2,8 +2,9 @@ from fastapi import APIRouter, Depends, HTTPException, status, Body
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from schemas.auth import UserCreate, UserUpdate, ResetPasswordSchema, LoginResponse, UserOut
+from schemas.admin import ValidateAccessTokenRequest, ValidateAccessTokenResponse
 from database import get_db
-from services import auth_service
+from services import auth_service, admin_service
 from models import User
 
 router = APIRouter()
@@ -62,5 +63,21 @@ def get_user_by_id(
     db: Session = Depends(get_db),
 ):
     return auth_service.get_user_by_id(user_id, current_user, db)
+
+
+@router.post(
+    "/validate-access-token",
+    response_model=ValidateAccessTokenResponse,
+    summary="Validate single-access token",
+    description="""Validate a single-use access token received via a shared link.
+    If valid, returns a JWT access token and the redirect URL.
+    The token can only be used once and expires after 24 hours."""
+)
+def validate_access_token(
+    data: ValidateAccessTokenRequest,
+    db: Session = Depends(get_db)
+):
+    result = admin_service.validate_single_access_token(data.token, db)
+    return ValidateAccessTokenResponse(**result)
 
 

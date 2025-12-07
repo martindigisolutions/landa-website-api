@@ -174,3 +174,110 @@ class AdminStats(BaseModel):
     orders_by_status: dict
     recent_orders: List[OrderAdminResponse]
 
+
+# ---------- User Management Schemas ----------
+
+class UserAdminCreate(BaseModel):
+    """Schema for admin to create a user (partial registration allowed)
+    At least one of phone, whatsapp_phone, or email must be provided.
+    """
+    phone: Optional[str] = None
+    whatsapp_phone: Optional[str] = None
+    email: Optional[str] = None
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+    birthdate: Optional[date] = None
+    user_type: str = "client"  # "stylist" or "client"
+    generate_access_link: bool = False  # If true, generates a single-access token link
+    redirect_url: Optional[str] = None  # Custom redirect URL for the access link
+
+
+class UserAdminResponse(BaseModel):
+    id: int
+    phone: Optional[str] = None
+    whatsapp_phone: Optional[str] = None
+    email: Optional[str] = None
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+    birthdate: Optional[date] = None
+    user_type: str
+    registration_complete: Optional[bool] = True
+    created_at: Optional[datetime] = None
+    # Suspension/Block status
+    is_suspended: Optional[bool] = False
+    suspended_at: Optional[datetime] = None
+    suspended_reason: Optional[str] = None
+    is_blocked: Optional[bool] = False
+    blocked_at: Optional[datetime] = None
+    blocked_reason: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
+class UserAdminCreatedResponse(UserAdminResponse):
+    """Response when creating a user - may include access_link if requested"""
+    access_link: Optional[str] = None
+
+
+class PaginatedUsersResponse(BaseModel):
+    page: int
+    page_size: int
+    total_items: int
+    total_pages: int
+    results: List[UserAdminResponse]
+
+
+# ---------- Single Access Token Schemas ----------
+
+class SingleAccessTokenCreate(BaseModel):
+    """Schema for generating a single-access token for an existing user"""
+    redirect_url: Optional[str] = None  # Custom redirect URL, defaults to WHOLESALE_FRONTEND_URL
+
+
+class SingleAccessTokenResponse(BaseModel):
+    id: int
+    user_id: int
+    token: str
+    access_link: str  # Full URL with token
+    redirect_url: str
+    created_at: datetime
+    expires_at: datetime
+    used: bool
+
+    class Config:
+        from_attributes = True
+
+
+class ValidateAccessTokenRequest(BaseModel):
+    """Request to validate a single-access token from frontend"""
+    token: str
+
+
+class ValidateAccessTokenResponse(BaseModel):
+    """Response after validating a single-access token"""
+    valid: bool
+    access_token: Optional[str] = None  # JWT token for the user
+    token_type: str = "bearer"
+    redirect_url: Optional[str] = None
+    user: Optional[UserAdminResponse] = None
+    message: Optional[str] = None
+
+
+# ---------- User Suspension/Block Schemas ----------
+
+class UserSuspendRequest(BaseModel):
+    """Request to suspend a user temporarily"""
+    reason: Optional[str] = None
+
+
+class UserBlockRequest(BaseModel):
+    """Request to block a user permanently"""
+    reason: Optional[str] = None
+
+
+class UserActionResponse(BaseModel):
+    """Response for user suspension/block actions"""
+    success: bool
+    message: str
+    user: UserAdminResponse

@@ -12,6 +12,19 @@ app = FastAPI(
     version="1.0.0"
 )
 
+
+@app.get("/api/health", tags=["Health"])
+def health_check():
+    """Health check endpoint to verify the API is running."""
+    return {
+        "success": True,
+        "data": {
+            "status": "healthy",
+            "service": "Landa Beauty Supply API",
+            "version": "1.0.0"
+        }
+    }
+
 # Enable CORS
 app.add_middleware(
     CORSMiddleware,

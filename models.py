@@ -8,16 +8,30 @@ class User(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     hashed_password = Column(String, nullable=False)
-    first_name = Column(String, nullable=False)
-    last_name = Column(String, nullable=False)
-    phone = Column(String, unique=True, index=True, nullable=False)
-    email = Column(String, unique=True, index=True, nullable=False)
+    first_name = Column(String, nullable=True)  # Nullable for partial registration
+    last_name = Column(String, nullable=True)   # Nullable for partial registration
+    phone = Column(String, unique=True, index=True, nullable=True)  # Nullable for partial registration
+    whatsapp_phone = Column(String, unique=True, index=True, nullable=True)  # WhatsApp phone number
+    email = Column(String, unique=True, index=True, nullable=True)  # Nullable for partial registration
     birthdate = Column(Date, nullable=True)
     user_type = Column(String, nullable=False, default="client")  # values: "stylist", "client"
+    registration_complete = Column(Boolean, default=True)  # False for partial registrations
     created_at = Column(DateTime, default=datetime.utcnow)
+    
+    # Suspension fields (temporary, reversible)
+    is_suspended = Column(Boolean, default=False)
+    suspended_at = Column(DateTime, nullable=True)
+    suspended_reason = Column(String, nullable=True)
+    
+    # Block fields (permanent, severe)
+    is_blocked = Column(Boolean, default=False)
+    blocked_at = Column(DateTime, nullable=True)
+    blocked_reason = Column(String, nullable=True)
 
     # Relationship to password reset requests
     password_reset_requests = relationship("PasswordResetRequest", back_populates="user")
+    # Relationship to single access tokens
+    single_access_tokens = relationship("SingleAccessToken", back_populates="user")
 
 class Product(Base):
     __tablename__ = "products"
@@ -102,3 +116,19 @@ class Application(Base):
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     last_used_at = Column(DateTime, nullable=True)
+
+
+class SingleAccessToken(Base):
+    """Single-use access token for user authentication via shared links"""
+    __tablename__ = "single_access_tokens"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    token = Column(String, unique=True, index=True, nullable=False)
+    redirect_url = Column(String, nullable=True)  # Where to redirect after validation
+    created_at = Column(DateTime, default=datetime.utcnow)
+    expires_at = Column(DateTime, nullable=False)
+    used = Column(Boolean, default=False)
+    used_at = Column(DateTime, nullable=True)
+
+    user = relationship("User", back_populates="single_access_tokens")

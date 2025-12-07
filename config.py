@@ -24,3 +24,7 @@ STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET")
 # If these are set, the super admin app will be auto-created on startup
 ADMIN_CLIENT_ID = os.getenv("ADMIN_CLIENT_ID")
 ADMIN_CLIENT_SECRET = os.getenv("ADMIN_CLIENT_SECRET")
+
+# Single Access Token Configuration
+WHOLESALE_FRONTEND_URL = os.getenv("WHOLESALE_FRONTEND_URL", "https://wholesale.landabeautysupply.com")
+SINGLE_ACCESS_TOKEN_EXPIRE_HOURS = int(os.getenv("SINGLE_ACCESS_TOKEN_EXPIRE_HOURS", 24))

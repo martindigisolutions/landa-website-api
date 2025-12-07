@@ -8,7 +8,10 @@ from schemas.admin import (
     ApplicationCreate, ApplicationUpdate, ApplicationResponse, ApplicationCreatedResponse,
     ProductCreate, ProductUpdate, ProductAdminResponse,
     OrderAdminResponse, OrderStatusUpdate, PaginatedOrdersResponse,
-    AdminStats
+    AdminStats,
+    UserAdminCreate, UserAdminResponse, UserAdminCreatedResponse, PaginatedUsersResponse,
+    SingleAccessTokenCreate, SingleAccessTokenResponse,
+    UserSuspendRequest, UserBlockRequest, UserActionResponse
 )
 from schemas.product import ProductSchema
 
@@ -209,4 +212,130 @@ def get_stats(
     db: Session = Depends(get_db)
 ):
     return admin_service.get_admin_stats(db)
+
+
+# ==================== USER MANAGEMENT ====================
+# These endpoints require users:read or users:write scope
+
+@router.post(
+    "/users",
+    response_model=UserAdminCreatedResponse,
+    summary="Create a new user",
+    description="""Create a new user (partial registration allowed).
+    At least one of phone, whatsapp_phone, or email must be provided.
+    Set generate_access_link=true to receive a single-use access link for the user."""
+)
+def create_user(
+    data: UserAdminCreate,
+    app=Depends(admin_service.require_scope("users:write")),
+    db: Session = Depends(get_db)
+):
+    return admin_service.create_user_admin(data, db)
+
+
+@router.get(
+    "/users",
+    response_model=PaginatedUsersResponse,
+    summary="List users",
+    description="Get a paginated list of users with optional filters."
+)
+def list_users(
+    search: Optional[str] = Query(None, description="Search by phone, whatsapp_phone, email, or name"),
+    user_type: Optional[str] = Query(None, description="Filter by user type (client, stylist)"),
+    registration_complete: Optional[bool] = Query(None, description="Filter by registration status"),
+    page: int = Query(1, ge=1, description="Page number"),
+    page_size: int = Query(20, ge=1, le=100, description="Items per page"),
+    app=Depends(admin_service.require_scope("users:read")),
+    db: Session = Depends(get_db)
+):
+    return admin_service.list_users(db, search, user_type, registration_complete, page, page_size)
+
+
+@router.get(
+    "/users/{user_id}",
+    response_model=UserAdminResponse,
+    summary="Get user details",
+    description="Get full details of a specific user by ID."
+)
+def get_user(
+    user_id: int,
+    app=Depends(admin_service.require_scope("users:read")),
+    db: Session = Depends(get_db)
+):
+    return admin_service.get_user_admin(user_id, db)
+
+
+@router.post(
+    "/users/{user_id}/single-access-token",
+    response_model=SingleAccessTokenResponse,
+    summary="Generate single-access token",
+    description="""Generate a new single-use access token for an existing user.
+    The token expires in 24 hours and can only be used once.
+    Optionally specify a redirect_url for where to send the user after authentication."""
+)
+def create_single_access_token(
+    user_id: int,
+    data: SingleAccessTokenCreate,
+    app=Depends(admin_service.require_scope("users:write")),
+    db: Session = Depends(get_db)
+):
+    return admin_service.create_single_access_token_for_user(user_id, data, db)
+
+
+@router.post(
+    "/users/{user_id}/suspend",
+    response_model=UserActionResponse,
+    summary="Suspend user",
+    description="Temporarily suspend a user. Suspended users cannot log in or make purchases."
+)
+def suspend_user(
+    user_id: int,
+    data: UserSuspendRequest = UserSuspendRequest(),
+    app=Depends(admin_service.require_scope("users:write")),
+    db: Session = Depends(get_db)
+):
+    return admin_service.suspend_user(user_id, data, db)
+
+
+@router.post(
+    "/users/{user_id}/unsuspend",
+    response_model=UserActionResponse,
+    summary="Unsuspend user",
+    description="Remove suspension from a user, allowing them to log in and make purchases again."
+)
+def unsuspend_user(
+    user_id: int,
+    app=Depends(admin_service.require_scope("users:write")),
+    db: Session = Depends(get_db)
+):
+    return admin_service.unsuspend_user(user_id, db)
+
+
+@router.post(
+    "/users/{user_id}/block",
+    response_model=UserActionResponse,
+    summary="Block user",
+    description="Permanently block a user. Blocked users cannot log in or make purchases. More severe than suspension."
+)
+def block_user(
+    user_id: int,
+    data: UserBlockRequest = UserBlockRequest(),
+    app=Depends(admin_service.require_scope("users:write")),
+    db: Session = Depends(get_db)
+):
+    return admin_service.block_user(user_id, data, db)
+
+
+@router.post(
+    "/users/{user_id}/unblock",
+    response_model=UserActionResponse,
+    summary="Unblock user",
+    description="Remove block from a user, allowing them to log in and make purchases again."
+)
+def unblock_user(
+    user_id: int,
+    app=Depends(admin_service.require_scope("users:write")),
+    db: Session = Depends(get_db)
+):
+    return admin_service.unblock_user(user_id, db)
 

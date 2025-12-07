@@ -46,10 +46,32 @@ def get_current_user(db: Session = Depends(get_db), token: str = Depends(oauth2_
     user = get_user_by_email_or_phone(db, identifier)
     if not user:
         raise credentials_exception
+    
+    # Check if user is blocked
+    if user.is_blocked:
+        raise HTTPException(
+            status_code=403, 
+            detail="Your account has been blocked. Please contact support."
+        )
+    
+    # Check if user is suspended
+    if user.is_suspended:
+        raise HTTPException(
+            status_code=403, 
+            detail="Your account has been temporarily suspended. Please contact support."
+        )
+    
     return user
 
 def get_user_by_email_or_phone(db: Session, identifier: str):
-    return db.query(User).filter(or_(User.email == identifier, User.phone == identifier)).first()
+    """Find user by email, phone, or whatsapp_phone"""
+    return db.query(User).filter(
+        or_(
+            User.email == identifier, 
+            User.phone == identifier,
+            User.whatsapp_phone == identifier
+        )
+    ).first()
 
 def authenticate_user(db: Session, identifier: str, password: str):
     user = get_user_by_email_or_phone(db, identifier)
@@ -60,15 +82,23 @@ def authenticate_user(db: Session, identifier: str, password: str):
 def register_user(user: UserCreate, db: Session):
     if get_user_by_email_or_phone(db, user.email) or get_user_by_email_or_phone(db, user.phone):
         raise HTTPException(status_code=400, detail="Email or phone already registered")
+    
+    # Check whatsapp_phone if provided
+    if user.whatsapp_phone:
+        existing = db.query(User).filter(User.whatsapp_phone == user.whatsapp_phone).first()
+        if existing:
+            raise HTTPException(status_code=400, detail="WhatsApp phone already registered")
 
     hashed = get_password_hash(user.password)
     new_user = User(
         first_name=user.first_name,
         last_name=user.last_name,
         phone=user.phone,
+        whatsapp_phone=user.whatsapp_phone,
         email=user.email,
         birthdate=user.birthdate,
         user_type=user.user_type,
+        registration_complete=True,
         hashed_password=hashed
     )
     db.add(new_user)
@@ -93,7 +123,23 @@ def login_user(form_data, db: Session):
     if not user:
         raise HTTPException(status_code=401, detail="Incorrect email/phone or password")
 
-    access_token = create_access_token(data={"sub": user.email}, expires_delta=timedelta(days=365))
+    # Check if user is blocked
+    if user.is_blocked:
+        raise HTTPException(
+            status_code=403, 
+            detail="Your account has been blocked. Please contact support."
+        )
+    
+    # Check if user is suspended
+    if user.is_suspended:
+        raise HTTPException(
+            status_code=403, 
+            detail="Your account has been temporarily suspended. Please contact support."
+        )
+
+    # Use email, phone, or whatsapp_phone as identifier for token
+    identifier = user.email or user.phone or user.whatsapp_phone
+    access_token = create_access_token(data={"sub": identifier}, expires_delta=timedelta(days=365))
 
     return {
         "access_token": access_token,
@@ -104,7 +150,9 @@ def login_user(form_data, db: Session):
             "last_name": user.last_name,
             "email": user.email,
             "phone": user.phone,
-            "user_type": user.user_type
+            "whatsapp_phone": user.whatsapp_phone,
+            "user_type": user.user_type,
+            "registration_complete": user.registration_complete
         }
     }
 

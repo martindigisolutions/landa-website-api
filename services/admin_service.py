@@ -9,14 +9,17 @@ from sqlalchemy import func
 from jose import jwt, JWTError
 
 from database import get_db
-from models import Application, Product, Order, OrderItem, User
+from models import Application, Product, Order, OrderItem, User, SingleAccessToken
 from schemas.admin import (
     ApplicationCreate, ApplicationUpdate, ApplicationResponse, ApplicationCreatedResponse,
     ProductCreate, ProductUpdate, ProductAdminResponse,
     OrderAdminResponse, OrderItemResponse, OrderStatusUpdate, PaginatedOrdersResponse,
-    AdminStats
+    AdminStats,
+    UserAdminCreate, UserAdminResponse, UserAdminCreatedResponse, PaginatedUsersResponse,
+    SingleAccessTokenCreate, SingleAccessTokenResponse,
+    UserSuspendRequest, UserBlockRequest, UserActionResponse
 )
-from config import SECRET_KEY, ALGORITHM
+from config import SECRET_KEY, ALGORITHM, WHOLESALE_FRONTEND_URL, SINGLE_ACCESS_TOKEN_EXPIRE_HOURS
 
 # Security scheme for OAuth2 Bearer tokens
 oauth2_bearer = HTTPBearer()
@@ -33,8 +36,19 @@ AVAILABLE_SCOPES = [
     "orders:read",
     "orders:write",
     "users:read",
+    "users:write",
     "stats:read",
 ]
+
+# Special scope that grants all permissions
+WILDCARD_SCOPE = "*"
+
+
+def expand_scopes(scopes: list) -> list:
+    """Expand wildcard scope to all available scopes"""
+    if WILDCARD_SCOPE in scopes:
+        return AVAILABLE_SCOPES.copy()
+    return scopes
 
 
 def generate_client_id() -> str:
@@ -125,7 +139,9 @@ def require_scope(required_scope: str):
             scopes: list = payload.get("scopes", [])
             client_id: str = payload.get("sub")
             
-            if required_scope not in scopes:
+            # Check if has wildcard or specific scope
+            has_permission = WILDCARD_SCOPE in scopes or required_scope in scopes
+            if not has_permission:
                 raise HTTPException(
                     status_code=403,
                     detail=f"Insufficient scope. Required: {required_scope}"
@@ -159,12 +175,15 @@ def require_scope(required_scope: str):
 
 def create_application(data: ApplicationCreate, db: Session) -> ApplicationCreatedResponse:
     """Create a new OAuth2 application"""
+    # Expand wildcard scope if present
+    scopes = expand_scopes(data.scopes)
+    
     # Validate scopes
-    for scope in data.scopes:
+    for scope in scopes:
         if scope not in AVAILABLE_SCOPES:
             raise HTTPException(
                 status_code=400,
-                detail=f"Invalid scope: {scope}. Available: {AVAILABLE_SCOPES}"
+                detail=f"Invalid scope: {scope}. Available: {AVAILABLE_SCOPES} or use '*' for all"
             )
     
     client_id = generate_client_id()
@@ -175,7 +194,7 @@ def create_application(data: ApplicationCreate, db: Session) -> ApplicationCreat
         client_secret_hash=hash_secret(client_secret),
         name=data.name,
         description=data.description,
-        scopes=data.scopes,
+        scopes=scopes,  # Use expanded scopes (handles "*" wildcard)
         is_active=True
     )
     
@@ -218,12 +237,15 @@ def update_application(app_id: int, data: ApplicationUpdate, db: Session) -> App
         raise HTTPException(status_code=404, detail="Application not found")
     
     if data.scopes is not None:
-        for scope in data.scopes:
+        # Expand wildcard scope if present
+        expanded_scopes = expand_scopes(data.scopes)
+        for scope in expanded_scopes:
             if scope not in AVAILABLE_SCOPES:
                 raise HTTPException(
                     status_code=400,
-                    detail=f"Invalid scope: {scope}. Available: {AVAILABLE_SCOPES}"
+                    detail=f"Invalid scope: {scope}. Available: {AVAILABLE_SCOPES} or use '*' for all"
                 )
+        data.scopes = expanded_scopes  # Replace with expanded scopes
     
     update_data = data.model_dump(exclude_unset=True)
     for field, value in update_data.items():
@@ -481,5 +503,374 @@ def get_admin_stats(db: Session) -> AdminStats:
         total_users=total_users,
         orders_by_status=orders_by_status,
         recent_orders=recent_orders
+    )
+
+
+# ---------- User Management ----------
+
+def generate_single_access_token() -> str:
+    """Generate a unique single-access token like 'sat_xxxxxx'"""
+    return f"sat_{secrets.token_urlsafe(32)}"
+
+
+def generate_temp_password() -> str:
+    """Generate a temporary password for partial registrations"""
+    return secrets.token_urlsafe(24)
+
+
+def get_password_hash(password: str) -> str:
+    """Hash a password using SHA256 (for temp passwords only)"""
+    return hashlib.sha256(password.encode()).hexdigest()
+
+
+def create_user_admin(data: UserAdminCreate, db: Session) -> UserAdminCreatedResponse:
+    """Create a new user from admin panel (partial registration allowed)"""
+    # Validate that at least one identifier is provided
+    if not data.phone and not data.whatsapp_phone and not data.email:
+        raise HTTPException(
+            status_code=400,
+            detail="At least one of phone, whatsapp_phone, or email must be provided"
+        )
+    
+    # Check for existing user with same phone, whatsapp_phone, or email
+    if data.phone:
+        existing = db.query(User).filter(User.phone == data.phone).first()
+        if existing:
+            raise HTTPException(status_code=400, detail="Phone already registered")
+    
+    if data.whatsapp_phone:
+        existing = db.query(User).filter(User.whatsapp_phone == data.whatsapp_phone).first()
+        if existing:
+            raise HTTPException(status_code=400, detail="WhatsApp phone already registered")
+    
+    if data.email:
+        existing = db.query(User).filter(User.email == data.email).first()
+        if existing:
+            raise HTTPException(status_code=400, detail="Email already registered")
+    
+    # Determine if this is a complete or partial registration
+    is_complete = all([data.first_name, data.last_name, data.phone, data.email])
+    
+    # Generate temporary password (user will set their own later)
+    temp_password = generate_temp_password()
+    
+    # Create user
+    user = User(
+        phone=data.phone,
+        whatsapp_phone=data.whatsapp_phone,
+        email=data.email,
+        first_name=data.first_name,
+        last_name=data.last_name,
+        birthdate=data.birthdate,
+        user_type=data.user_type,
+        registration_complete=is_complete,
+        hashed_password=get_password_hash(temp_password)  # Temp password
+    )
+    
+    try:
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+    except Exception as e:
+        db.rollback()
+        error_msg = str(e)
+        if "UNIQUE constraint" in error_msg:
+            raise HTTPException(status_code=400, detail="User with this identifier already exists")
+        raise HTTPException(status_code=500, detail=f"Error creating user: {error_msg}")
+    
+    access_link = None
+    
+    # Generate single-access token if requested
+    if data.generate_access_link:
+        redirect_url = data.redirect_url or WHOLESALE_FRONTEND_URL
+        token_obj = _create_single_access_token(user.id, redirect_url, db)
+        access_link = f"{WHOLESALE_FRONTEND_URL}/auth?sat={token_obj.token}"
+    
+    return UserAdminCreatedResponse(
+        id=user.id,
+        phone=user.phone,
+        email=user.email,
+        first_name=user.first_name,
+        last_name=user.last_name,
+        birthdate=user.birthdate,
+        user_type=user.user_type,
+        registration_complete=user.registration_complete,
+        created_at=user.created_at,
+        access_link=access_link
+    )
+
+
+def _create_single_access_token(user_id: int, redirect_url: str, db: Session) -> SingleAccessToken:
+    """Internal function to create a single-access token"""
+    token = generate_single_access_token()
+    expires_at = datetime.utcnow() + timedelta(hours=SINGLE_ACCESS_TOKEN_EXPIRE_HOURS)
+    
+    token_obj = SingleAccessToken(
+        user_id=user_id,
+        token=token,
+        redirect_url=redirect_url,
+        expires_at=expires_at,
+        used=False
+    )
+    
+    db.add(token_obj)
+    db.commit()
+    db.refresh(token_obj)
+    
+    return token_obj
+
+
+def create_single_access_token_for_user(
+    user_id: int, 
+    data: SingleAccessTokenCreate, 
+    db: Session
+) -> SingleAccessTokenResponse:
+    """Create a single-access token for an existing user"""
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    redirect_url = data.redirect_url or WHOLESALE_FRONTEND_URL
+    token_obj = _create_single_access_token(user_id, redirect_url, db)
+    access_link = f"{WHOLESALE_FRONTEND_URL}/auth?sat={token_obj.token}"
+    
+    return SingleAccessTokenResponse(
+        id=token_obj.id,
+        user_id=token_obj.user_id,
+        token=token_obj.token,
+        access_link=access_link,
+        redirect_url=token_obj.redirect_url,
+        created_at=token_obj.created_at,
+        expires_at=token_obj.expires_at,
+        used=token_obj.used
+    )
+
+
+def list_users(
+    db: Session,
+    search: Optional[str] = None,
+    user_type: Optional[str] = None,
+    registration_complete: Optional[bool] = None,
+    page: int = 1,
+    page_size: int = 20
+) -> PaginatedUsersResponse:
+    """List users with filters and pagination"""
+    query = db.query(User)
+    
+    if search:
+        search_filter = f"%{search}%"
+        query = query.filter(
+            (User.phone.ilike(search_filter)) |
+            (User.whatsapp_phone.ilike(search_filter)) |
+            (User.email.ilike(search_filter)) |
+            (User.first_name.ilike(search_filter)) |
+            (User.last_name.ilike(search_filter))
+        )
+    
+    if user_type:
+        query = query.filter(User.user_type == user_type)
+    
+    if registration_complete is not None:
+        query = query.filter(User.registration_complete == registration_complete)
+    
+    total_items = query.count()
+    total_pages = (total_items + page_size - 1) // page_size
+    
+    users = query.order_by(User.created_at.desc()).offset((page - 1) * page_size).limit(page_size).all()
+    
+    results = [UserAdminResponse.model_validate(user) for user in users]
+    
+    return PaginatedUsersResponse(
+        page=page,
+        page_size=page_size,
+        total_items=total_items,
+        total_pages=total_pages,
+        results=results
+    )
+
+
+def get_user_admin(user_id: int, db: Session) -> UserAdminResponse:
+    """Get a single user by ID"""
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    return UserAdminResponse.model_validate(user)
+
+
+def validate_single_access_token(token: str, db: Session) -> dict:
+    """
+    Validate a single-access token from frontend.
+    Returns user info and JWT if valid, marks token as used.
+    """
+    token_obj = db.query(SingleAccessToken).filter(
+        SingleAccessToken.token == token
+    ).first()
+    
+    if not token_obj:
+        return {
+            "valid": False,
+            "message": "Token not found"
+        }
+    
+    if token_obj.used:
+        return {
+            "valid": False,
+            "message": "Token has already been used"
+        }
+    
+    if datetime.utcnow() > token_obj.expires_at:
+        return {
+            "valid": False,
+            "message": "Token has expired"
+        }
+    
+    # Mark token as used
+    token_obj.used = True
+    token_obj.used_at = datetime.utcnow()
+    db.commit()
+    
+    # Get user
+    user = db.query(User).filter(User.id == token_obj.user_id).first()
+    if not user:
+        return {
+            "valid": False,
+            "message": "User not found"
+        }
+    
+    # Check if user is blocked
+    if user.is_blocked:
+        return {
+            "valid": False,
+            "message": "Your account has been blocked. Please contact support."
+        }
+    
+    # Check if user is suspended
+    if user.is_suspended:
+        return {
+            "valid": False,
+            "message": "Your account has been temporarily suspended. Please contact support."
+        }
+    
+    # Create JWT access token for the user
+    # Use email, phone, or whatsapp_phone as identifier (in order of preference)
+    identifier = user.email or user.phone or user.whatsapp_phone
+    expires_delta = timedelta(days=365)
+    expire = datetime.utcnow() + expires_delta
+    
+    to_encode = {
+        "sub": identifier,
+        "exp": expire
+    }
+    access_token = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+    
+    return {
+        "valid": True,
+        "access_token": access_token,
+        "token_type": "bearer",
+        "redirect_url": token_obj.redirect_url,
+        "user": UserAdminResponse.model_validate(user),
+        "message": "Token validated successfully"
+    }
+
+
+# ---------- User Suspension/Block Management ----------
+
+def suspend_user(user_id: int, data: UserSuspendRequest, db: Session) -> UserActionResponse:
+    """Suspend a user temporarily"""
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    if user.is_blocked:
+        raise HTTPException(status_code=400, detail="User is blocked. Unblock first before suspending.")
+    
+    if user.is_suspended:
+        raise HTTPException(status_code=400, detail="User is already suspended")
+    
+    user.is_suspended = True
+    user.suspended_at = datetime.utcnow()
+    user.suspended_reason = data.reason
+    
+    db.commit()
+    db.refresh(user)
+    
+    return UserActionResponse(
+        success=True,
+        message=f"User '{user.first_name or user.email or user.phone}' has been suspended",
+        user=UserAdminResponse.model_validate(user)
+    )
+
+
+def unsuspend_user(user_id: int, db: Session) -> UserActionResponse:
+    """Remove suspension from a user"""
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    if not user.is_suspended:
+        raise HTTPException(status_code=400, detail="User is not suspended")
+    
+    user.is_suspended = False
+    user.suspended_at = None
+    user.suspended_reason = None
+    
+    db.commit()
+    db.refresh(user)
+    
+    return UserActionResponse(
+        success=True,
+        message=f"User '{user.first_name or user.email or user.phone}' suspension has been lifted",
+        user=UserAdminResponse.model_validate(user)
+    )
+
+
+def block_user(user_id: int, data: UserBlockRequest, db: Session) -> UserActionResponse:
+    """Block a user permanently"""
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    if user.is_blocked:
+        raise HTTPException(status_code=400, detail="User is already blocked")
+    
+    # If user was suspended, clear suspension since block is more severe
+    user.is_suspended = False
+    user.suspended_at = None
+    user.suspended_reason = None
+    
+    user.is_blocked = True
+    user.blocked_at = datetime.utcnow()
+    user.blocked_reason = data.reason
+    
+    db.commit()
+    db.refresh(user)
+    
+    return UserActionResponse(
+        success=True,
+        message=f"User '{user.first_name or user.email or user.phone}' has been blocked",
+        user=UserAdminResponse.model_validate(user)
+    )
+
+
+def unblock_user(user_id: int, db: Session) -> UserActionResponse:
+    """Remove block from a user"""
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    if not user.is_blocked:
+        raise HTTPException(status_code=400, detail="User is not blocked")
+    
+    user.is_blocked = False
+    user.blocked_at = None
+    user.blocked_reason = None
+    
+    db.commit()
+    db.refresh(user)
+    
+    return UserActionResponse(
+        success=True,
+        message=f"User '{user.first_name or user.email or user.phone}' has been unblocked",
+        user=UserAdminResponse.model_validate(user)
     )
 

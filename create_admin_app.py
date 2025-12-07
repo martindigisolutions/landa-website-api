@@ -54,13 +54,13 @@ def create_super_admin_app(force: bool = False, output_file: str = None):
             client_secret = generate_client_secret()
             print("🔑 Generating new credentials")
         
-        # Create the super admin app
+        # Create the super admin app with wildcard scope (all permissions)
         app = Application(
             client_id=client_id,
             client_secret_hash=hash_secret(client_secret),
             name="Super Admin Dashboard",
             description="Main admin application with full access",
-            scopes=AVAILABLE_SCOPES,
+            scopes=["*"],  # Wildcard = all permissions
             is_active=True
         )
         
@@ -70,7 +70,7 @@ def create_super_admin_app(force: bool = False, output_file: str = None):
         credentials = {
             "client_id": client_id,
             "client_secret": client_secret,
-            "scopes": AVAILABLE_SCOPES
+            "scopes": ["*"]  # Wildcard = all permissions
         }
         
         # Output to file if requested
@@ -93,8 +93,11 @@ def create_super_admin_app(force: bool = False, output_file: str = None):
         print(f"   client_secret: {client_secret}")
         print()
         print("📋 Granted scopes:")
+        print("   - * (all permissions)")
+        print()
+        print("   Includes:")
         for scope in AVAILABLE_SCOPES:
-            print(f"   - {scope}")
+            print(f"     • {scope}")
         print()
         print("=" * 60)
         print("🚀 How to use:")
