@@ -257,7 +257,8 @@ class ValidateAccessTokenRequest(BaseModel):
 class ValidateAccessTokenResponse(BaseModel):
     """Response after validating a single-access token"""
     valid: bool
-    access_token: Optional[str] = None  # JWT token for the user
+    already_used: bool = False  # True if token was already used before
+    access_token: Optional[str] = None  # JWT token for the user (None if already_used)
     token_type: str = "bearer"
     redirect_url: Optional[str] = None
     user: Optional[UserAdminResponse] = None

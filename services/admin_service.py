@@ -701,6 +701,10 @@ def validate_single_access_token(token: str, db: Session) -> dict:
     """
     Validate a single-access token from frontend.
     Returns user info and JWT if valid, marks token as used.
+    
+    If token was already used but not expired:
+      - Returns valid=True, already_used=True, redirect_url (no new JWT)
+      - Frontend can redirect user if they're already logged in
     """
     token_obj = db.query(SingleAccessToken).filter(
         SingleAccessToken.token == token
@@ -709,22 +713,56 @@ def validate_single_access_token(token: str, db: Session) -> dict:
     if not token_obj:
         return {
             "valid": False,
+            "already_used": False,
             "message": "Token not found"
         }
     
-    if token_obj.used:
-        return {
-            "valid": False,
-            "message": "Token has already been used"
-        }
-    
+    # Check expiration first (applies to both used and unused tokens)
     if datetime.utcnow() > token_obj.expires_at:
         return {
             "valid": False,
+            "already_used": False,
             "message": "Token has expired"
         }
     
-    # Mark token as used
+    # Get user
+    user = db.query(User).filter(User.id == token_obj.user_id).first()
+    if not user:
+        return {
+            "valid": False,
+            "already_used": False,
+            "message": "User not found"
+        }
+    
+    # Check if user is blocked or suspended
+    if user.is_blocked:
+        return {
+            "valid": False,
+            "already_used": False,
+            "message": "Your account has been blocked. Please contact support."
+        }
+    
+    if user.is_suspended:
+        return {
+            "valid": False,
+            "already_used": False,
+            "message": "Your account has been temporarily suspended. Please contact support."
+        }
+    
+    # If token already used, return success but with already_used=True
+    # No new JWT is generated, frontend should check if user is already logged in
+    if token_obj.used:
+        return {
+            "valid": True,
+            "already_used": True,
+            "access_token": None,
+            "token_type": "bearer",
+            "redirect_url": token_obj.redirect_url,
+            "user": UserAdminResponse.model_validate(user),
+            "message": "Token was already used. Redirect if user is logged in."
+        }
+    
+    # First time use - mark as used
     token_obj.used = True
     token_obj.used_at = datetime.utcnow()
     db.commit()
@@ -765,6 +803,7 @@ def validate_single_access_token(token: str, db: Session) -> dict:
     
     return {
         "valid": True,
+        "already_used": False,
         "access_token": access_token,
         "token_type": "bearer",
         "redirect_url": token_obj.redirect_url,
