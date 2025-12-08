@@ -10,34 +10,96 @@ from models import Product
 from schemas.product import (
     ProductPublic, 
     ProductVariantPublic, 
-    ProductVariantGroupPublic,
+    VariantTypePublic,
+    VariantCategoryPublic,
     PaginatedProductResponse
 )
 from utils.language import localize_field, localize_gallery
 
 
 def _product_to_public(product: Product, lang: str = "es") -> ProductPublic:
-    """Convert product model to localized public response"""
-    variant_groups = []
+    """Convert product model to localized public response with grouped variants"""
+    variant_types = []
+    
     if product.has_variants and product.variant_groups:
+        # Group by variant_type
+        grouped_by_type = {}
         for group in sorted(product.variant_groups, key=lambda g: g.display_order):
-            variants = []
-            for v in sorted(group.variants, key=lambda v: v.display_order):
-                variants.append(ProductVariantPublic(
-                    id=v.id,
-                    seller_sku=v.seller_sku,
-                    name=v.name,  # Variant names could also be localized if needed
-                    regular_price=v.regular_price,
-                    sale_price=v.sale_price,
-                    stock=v.stock,
-                    is_in_stock=v.is_in_stock,
-                    image_url=v.image_url
-                ))
-            variant_groups.append(ProductVariantGroupPublic(
-                id=group.id,
-                name=group.name,  # Group names could also be localized if needed
-                variants=variants
-            ))
+            vtype = group.variant_type or "General"
+            if vtype not in grouped_by_type:
+                grouped_by_type[vtype] = []
+            grouped_by_type[vtype].append(group)
+        
+        # Build variant_types response
+        for vtype, groups in grouped_by_type.items():
+            # Check if this type has categories or is simple
+            # Simple = single group with name=null OR name equals variant_type
+            is_simple = (
+                len(groups) == 1 and 
+                (not groups[0].name or groups[0].name == vtype)
+            )
+            
+            if not is_simple:
+                # Has categories - build categories list
+                categories = []
+                for group in groups:
+                    # Only include active variants
+                    active_variants = [v for v in group.variants if getattr(v, 'active', True)]
+                    if not active_variants:
+                        continue
+                    
+                    variants = []
+                    for v in sorted(active_variants, key=lambda v: v.display_order):
+                        variants.append(ProductVariantPublic(
+                            id=v.id,
+                            seller_sku=v.seller_sku,
+                            name=v.name,
+                            variant_value=v.variant_value,
+                            regular_price=v.regular_price,
+                            sale_price=v.sale_price,
+                            stock=v.stock,
+                            is_in_stock=v.is_in_stock,
+                            image_url=v.image_url
+                        ))
+                    
+                    if variants:
+                        categories.append(VariantCategoryPublic(
+                            id=group.id,
+                            name=group.name or vtype,
+                            variants=variants
+                        ))
+                
+                if categories:
+                    variant_types.append(VariantTypePublic(
+                        type=vtype,
+                        categories=categories,
+                        variants=None
+                    ))
+            else:
+                # Simple variants (single group with name=null)
+                group = groups[0]
+                active_variants = [v for v in group.variants if getattr(v, 'active', True)]
+                
+                variants = []
+                for v in sorted(active_variants, key=lambda v: v.display_order):
+                    variants.append(ProductVariantPublic(
+                        id=v.id,
+                        seller_sku=v.seller_sku,
+                        name=v.name,
+                        variant_value=v.variant_value,
+                        regular_price=v.regular_price,
+                        sale_price=v.sale_price,
+                        stock=v.stock,
+                        is_in_stock=v.is_in_stock,
+                        image_url=v.image_url
+                    ))
+                
+                if variants:
+                    variant_types.append(VariantTypePublic(
+                        type=vtype,
+                        categories=None,
+                        variants=variants
+                    ))
     
     return ProductPublic(
         id=product.id,
@@ -58,7 +120,7 @@ def _product_to_public(product: Product, lang: str = "es") -> ProductPublic:
         currency=product.currency,
         has_variants=product.has_variants,
         brand=product.brand,
-        variant_groups=variant_groups
+        variant_types=variant_types
     )
 
 

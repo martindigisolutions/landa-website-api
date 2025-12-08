@@ -88,7 +88,8 @@ class ProductVariantGroup(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     product_id = Column(Integer, ForeignKey("products.id"), nullable=False)
-    name = Column(String, nullable=False)  # e.g., "Naturales", "Fantasías"
+    variant_type = Column(String, nullable=False)  # e.g., "Color", "Tamaño", "Volumen" - REQUIRED
+    name = Column(String, nullable=True)  # Category name e.g., "Naturales", "Fantasías" - OPTIONAL (null = simple variants)
     display_order = Column(Integer, default=0)  # For sorting groups
     
     product = relationship("Product", back_populates="variant_groups")
@@ -101,7 +102,9 @@ class ProductVariant(Base):
     id = Column(Integer, primary_key=True, index=True)
     group_id = Column(Integer, ForeignKey("product_variant_groups.id"), nullable=False)
     seller_sku = Column(String, unique=True, index=True, nullable=True)
-    name = Column(String, nullable=False)  # e.g., "Rubio", "Azul"
+    name = Column(String, nullable=False)  # Display name e.g., "Rubio", "Azul", "Vol 10"
+    variant_value = Column(String, nullable=True)  # Clean value for filters/search e.g., "Rubio", "Vol 10"
+    barcode = Column(String, nullable=True)  # Barcode/UPC for scanning
     attributes = Column(JSON, default=dict)  # Additional attributes if needed
     regular_price = Column(Float, nullable=True)  # Override parent price if set
     sale_price = Column(Float, nullable=True)
@@ -109,6 +112,7 @@ class ProductVariant(Base):
     is_in_stock = Column(Boolean, default=True)
     image_url = Column(String, nullable=True)  # Variant-specific image
     display_order = Column(Integer, default=0)  # For sorting variants
+    active = Column(Boolean, default=True)  # Soft delete without removing
     
     group = relationship("ProductVariantGroup", back_populates="variants")
 

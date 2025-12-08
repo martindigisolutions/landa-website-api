@@ -204,49 +204,48 @@ Content-Type: application/json
 
 ### 4. Crear Producto con Variantes
 
+La estructura de variantes soporta **3 niveles**:
+1. **Tipo de Variante** (`variant_type`): "Color", "Tamaño", "Volumen" - REQUERIDO
+2. **Categoría** (`name`): "Naturales", "Fantasías" - OPCIONAL (null = variantes simples)
+3. **Variantes**: Los valores específicos
+
 ```http
 POST /admin/products
 Authorization: Bearer <token>
 Content-Type: application/json
 ```
 
-**Body:**
+**Ejemplo 1: Variantes CON categorías (tintes con grupos)**
 ```json
 {
   "seller_sku": "TINTE-LOREAL-001",
   "name": "Tinte L'Oreal Profesional",
   "regular_price": 25.99,
   "brand": "L'Oreal",
-  "currency": "USD",
   "has_variants": true,
   "variant_groups": [
     {
+      "variant_type": "Color",
       "name": "Naturales",
       "display_order": 0,
       "variants": [
         {
           "seller_sku": "TINTE-NAT-RUBIO",
           "name": "Rubio",
+          "variant_value": "Rubio",
           "stock": 50,
-          "is_in_stock": true,
           "regular_price": 25.99,
           "image_url": "https://example.com/rubio.jpg"
         },
         {
           "seller_sku": "TINTE-NAT-CASTANO",
           "name": "Castaño",
-          "stock": 30,
-          "is_in_stock": true
-        },
-        {
-          "seller_sku": "TINTE-NAT-NEGRO",
-          "name": "Negro",
-          "stock": 40,
-          "is_in_stock": true
+          "stock": 30
         }
       ]
     },
     {
+      "variant_type": "Color",
       "name": "Fantasías",
       "display_order": 1,
       "variants": [
@@ -260,12 +259,66 @@ Content-Type: application/json
           "seller_sku": "TINTE-FAN-ROSA",
           "name": "Rosa",
           "stock": 15
-        },
-        {
-          "seller_sku": "TINTE-FAN-VERDE",
-          "name": "Verde",
-          "stock": 10
         }
+      ]
+    }
+  ]
+}
+```
+
+**Ejemplo 2: Variantes SIMPLES sin categorías (peróxido)**
+```json
+{
+  "seller_sku": "PEROXIDO-001",
+  "name": "Peróxido Profesional",
+  "regular_price": 6.99,
+  "has_variants": true,
+  "variant_groups": [
+    {
+      "variant_type": "Volumen",
+      "name": null,
+      "display_order": 0,
+      "variants": [
+        {"seller_sku": "PER-V10", "name": "Vol 10", "stock": 100},
+        {"seller_sku": "PER-V20", "name": "Vol 20", "stock": 80},
+        {"seller_sku": "PER-V30", "name": "Vol 30", "stock": 60}
+      ]
+    }
+  ]
+}
+```
+
+**Ejemplo 3: Producto con MÚLTIPLES tipos de variantes**
+```json
+{
+  "seller_sku": "TINTE-MULTI-001",
+  "name": "Tinte con colores y peróxidos",
+  "regular_price": 4.95,
+  "has_variants": true,
+  "variant_groups": [
+    {
+      "variant_type": "Peroxido",
+      "name": null,
+      "variants": [
+        {"seller_sku": "906", "name": "Vol 10", "stock": 100},
+        {"seller_sku": "907", "name": "Vol 20", "stock": 100},
+        {"seller_sku": "908", "name": "Vol 30", "stock": 100}
+      ]
+    },
+    {
+      "variant_type": "Color",
+      "name": "Colores Naturales",
+      "variants": [
+        {"seller_sku": "902", "name": "Negro", "stock": 100},
+        {"seller_sku": "903", "name": "Azul", "stock": 100}
+      ]
+    },
+    {
+      "variant_type": "Color",
+      "name": "Fantasia",
+      "variants": [
+        {"seller_sku": "904", "name": "Rojo", "stock": 100},
+        {"seller_sku": "905", "name": "Amarillo Neon", "stock": 100}
       ]
     }
   ]
@@ -276,7 +329,8 @@ Content-Type: application/json
 
 | Campo | Tipo | Requerido | Descripción |
 |-------|------|-----------|-------------|
-| `name` | string | **Sí** | Nombre del grupo (ej: "Naturales") |
+| `variant_type` | string | **Sí** | Tipo de variante: "Color", "Tamaño", "Volumen", etc. |
+| `name` | string | No | Categoría: "Naturales", "Fantasías" (`null` = variantes simples) |
 | `display_order` | int | No | Orden de visualización (0, 1, 2...) |
 | `variants` | array | **Sí** | Lista de variantes |
 
@@ -285,16 +339,22 @@ Content-Type: application/json
 | Campo | Tipo | Requerido | Descripción |
 |-------|------|-----------|-------------|
 | `seller_sku` | string | No | SKU único de la variante |
-| `name` | string | **Sí** | Nombre de la variante (ej: "Rubio") |
+| `name` | string | **Sí** | Nombre para mostrar (ej: "Rubio") |
+| `variant_value` | string | No | Valor limpio para filtros (default: `name`) |
+| `barcode` | string | No | Código de barras/UPC |
 | `attributes` | object | No | Atributos adicionales `{}` |
 | `regular_price` | float | No | Precio (si es diferente al padre) |
 | `sale_price` | float | No | Precio de oferta |
 | `stock` | int | No | Inventario de esta variante |
-| `is_in_stock` | bool | No | Disponibilidad |
+| `is_in_stock` | bool | No | Disponibilidad (default: true) |
 | `image_url` | string | No | Imagen específica de variante |
 | `display_order` | int | No | Orden de visualización |
+| `active` | bool | No | Activo (default: true, false = oculto) |
 
-> **Nota:** Si `regular_price` de la variante es `null`, se usa el precio del producto padre.
+> **Notas:**
+> - Si `variant_value` no se envía, se usa el valor de `name`
+> - Si `regular_price` de la variante es `null`, se usa el precio del producto padre
+> - Variantes con `active: false` no aparecen en el frontend público
 
 ---
 
@@ -330,6 +390,7 @@ Content-Type: application/json
 {
   "variant_groups": [
     {
+      "variant_type": "Color",
       "name": "Naturales",
       "variants": [
         {"name": "Rubio", "seller_sku": "TINTE-RUB", "stock": 100},
@@ -338,6 +399,7 @@ Content-Type: application/json
       ]
     },
     {
+      "variant_type": "Color",
       "name": "Fantasías",
       "variants": [
         {"name": "Azul", "seller_sku": "TINTE-AZU", "stock": 20}
@@ -579,85 +641,258 @@ Authorization: Bearer <token>
 
 ---
 
-## Respuesta de Producto con Variantes
+## Respuesta de Producto con Variantes (Admin y Frontend)
+
+La respuesta agrupa las variantes por `variant_type`. Cada tipo puede tener:
+- **`categories`**: Lista de categorías con variantes (cuando hay subcategorías)
+- **`variants`**: Lista directa de variantes (cuando es simple, sin categorías)
 
 ```json
 {
-  "id": 1,
-  "seller_sku": "TINTE-LOREAL-001",
-  "name": "Tinte L'Oreal Profesional",
-  "short_description": null,
-  "description": null,
-  "regular_price": 25.99,
-  "sale_price": null,
-  "stock": null,
-  "is_in_stock": null,
-  "restock_date": null,
-  "is_favorite": null,
-  "notify_when_available": null,
-  "image_url": null,
-  "currency": "USD",
-  "low_stock_threshold": null,
+  "id": 266,
+  "seller_sku": "901",
+  "name": "Tintes prueba con varios tipos de variantes",
+  "name_en": "Dyes test with multiple variant types",
+  "regular_price": 4.95,
   "has_variants": true,
-  "brand": "L'Oreal",
-  "variant_groups": [
+  "brand": "SARAH K",
+  "created_at": "2025-12-08T08:55:25.345884",
+  "updated_at": "2025-12-08T09:32:50.793527",
+  "variant_types": [
     {
-      "id": 1,
-      "product_id": 1,
-      "name": "Naturales",
-      "display_order": 0,
-      "variants": [
-        {
-          "id": 1,
-          "group_id": 1,
-          "seller_sku": "TINTE-NAT-RUBIO",
-          "name": "Rubio",
-          "attributes": {},
-          "regular_price": 25.99,
-          "sale_price": null,
-          "stock": 50,
-          "is_in_stock": true,
-          "image_url": "https://example.com/rubio.jpg",
-          "display_order": 0
-        },
-        {
-          "id": 2,
-          "group_id": 1,
-          "seller_sku": "TINTE-NAT-CASTANO",
-          "name": "Castaño",
-          "attributes": {},
-          "regular_price": null,
-          "sale_price": null,
-          "stock": 30,
-          "is_in_stock": true,
-          "image_url": null,
-          "display_order": 0
-        }
-      ]
-    },
-    {
-      "id": 2,
-      "product_id": 1,
-      "name": "Fantasías",
-      "display_order": 1,
-      "variants": [
+      "type": "Color",
+      "categories": [
         {
           "id": 3,
-          "group_id": 2,
-          "seller_sku": "TINTE-FAN-AZUL",
-          "name": "Azul",
-          "attributes": {},
-          "regular_price": 29.99,
-          "sale_price": null,
-          "stock": 20,
-          "is_in_stock": true,
-          "image_url": null,
-          "display_order": 0
+          "name": "Colores Naturales",
+          "display_order": 0,
+          "variants": [
+            {
+              "id": 5,
+              "group_id": 3,
+              "seller_sku": "902",
+              "name": "Negro",
+              "variant_value": "Negro",
+              "barcode": null,
+              "regular_price": 4.95,
+              "stock": 100,
+              "is_in_stock": true,
+              "active": true
+            },
+            {
+              "id": 6,
+              "group_id": 3,
+              "seller_sku": "903",
+              "name": "Azul",
+              "variant_value": "Azul",
+              "regular_price": 4.95,
+              "stock": 100,
+              "active": true
+            }
+          ]
+        },
+        {
+          "id": 4,
+          "name": "Fantasia",
+          "display_order": 0,
+          "variants": [
+            {
+              "id": 7,
+              "group_id": 4,
+              "seller_sku": "904",
+              "name": "Rojo",
+              "variant_value": "Rojo",
+              "stock": 100,
+              "active": true
+            },
+            {
+              "id": 8,
+              "group_id": 4,
+              "seller_sku": "905",
+              "name": "Amarillo Neon",
+              "variant_value": "Amarillo Neon",
+              "stock": 100,
+              "active": true
+            }
+          ]
+        }
+      ],
+      "variants": null
+    },
+    {
+      "type": "Peroxido",
+      "categories": null,
+      "variants": [
+        {
+          "id": 9,
+          "group_id": 5,
+          "seller_sku": "906",
+          "name": "Vol 10",
+          "variant_value": "Vol 10",
+          "regular_price": 4.95,
+          "stock": 100,
+          "active": true
+        },
+        {
+          "id": 10,
+          "group_id": 5,
+          "seller_sku": "907",
+          "name": "Vol 20",
+          "variant_value": "Vol 20",
+          "stock": 100,
+          "active": true
+        },
+        {
+          "id": 11,
+          "group_id": 5,
+          "seller_sku": "908",
+          "name": "Vol 30",
+          "variant_value": "Vol 30",
+          "stock": 100,
+          "active": true
         }
       ]
     }
   ]
 }
+```
+
+### Lógica de la estructura
+
+| Situación | `categories` | `variants` |
+|-----------|--------------|------------|
+| Con subcategorías (Color → Naturales, Fantasía) | `[{name, variants}]` | `null` |
+| Sin subcategorías (Peroxido → Vol 10, 20, 30) | `null` | `[{variant}]` |
+
+---
+
+## Para Frontend Next.js - Procesando Variantes
+
+### Respuesta del Frontend (con Accept-Language: es)
+
+El frontend público recibe solo variantes **activas** con la misma estructura `variant_types`:
+
+```json
+{
+  "id": 266,
+  "name": "Tinte con colores y peróxidos",
+  "has_variants": true,
+  "variant_types": [
+    {
+      "type": "Color",
+      "categories": [
+        {
+          "id": 3,
+          "name": "Colores Naturales",
+          "variants": [
+            {"id": 5, "name": "Negro", "variant_value": "Negro", "stock": 100},
+            {"id": 6, "name": "Azul", "variant_value": "Azul", "stock": 100}
+          ]
+        },
+        {
+          "id": 4,
+          "name": "Fantasia",
+          "variants": [
+            {"id": 7, "name": "Rojo", "variant_value": "Rojo", "stock": 100},
+            {"id": 8, "name": "Amarillo Neon", "variant_value": "Amarillo Neon", "stock": 100}
+          ]
+        }
+      ],
+      "variants": null
+    },
+    {
+      "type": "Peroxido",
+      "categories": null,
+      "variants": [
+        {"id": 9, "name": "Vol 10", "variant_value": "Vol 10", "stock": 100},
+        {"id": 10, "name": "Vol 20", "variant_value": "Vol 20", "stock": 100},
+        {"id": 11, "name": "Vol 30", "variant_value": "Vol 30", "stock": 100}
+      ]
+    }
+  ]
+}
+```
+
+### Código React/Next.js para renderizar variantes
+
+La API ya devuelve los datos agrupados, solo necesitas renderizar:
+
+```typescript
+interface Variant {
+  id: number;
+  name: string;
+  variant_value: string | null;
+  regular_price: number | null;
+  stock: number | null;
+  is_in_stock: boolean | null;
+  image_url: string | null;
+}
+
+interface VariantCategory {
+  id: number;
+  name: string;
+  variants: Variant[];
+}
+
+interface VariantType {
+  type: string;                          // "Color", "Peroxido"
+  categories: VariantCategory[] | null;  // null = variantes simples
+  variants: Variant[] | null;            // Solo cuando categories es null
+}
+
+interface Product {
+  // ... otros campos
+  variant_types: VariantType[];
+}
+
+// Componente para renderizar variantes
+function ProductVariants({ product }: { product: Product }) {
+  return (
+    <div>
+      {product.variant_types.map((vt) => (
+        <div key={vt.type} className="variant-type-section">
+          <h3>{vt.type}</h3>
+
+          {vt.categories ? (
+            // CON categorías (ej: Color → Naturales, Fantasías)
+            vt.categories.map((category) => (
+              <div key={category.id} className="variant-category">
+                <h4>{category.name}</h4>
+                <div className="variants-grid">
+                  {category.variants.map((variant) => (
+                    <VariantButton key={variant.id} variant={variant} />
+                  ))}
+                </div>
+              </div>
+            ))
+          ) : (
+            // SIN categorías (ej: Peroxido → Vol 10, Vol 20, Vol 30)
+            <div className="variants-grid">
+              {vt.variants?.map((variant) => (
+                <VariantButton key={variant.id} variant={variant} />
+              ))}
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+```
+
+### Resultado visual esperado
+
+```
+📦 Variantes del Producto
+
+🔹 Peroxido (variantes simples)
+   [Vol 10] [Vol 20] [Vol 30]
+
+🎨 Color (por categoría)
+   📁 Colores Naturales
+      [Negro] [Azul]
+   📁 Fantasia
+      [Rojo] [Amarillo Neon]
 ```
 
 ---
@@ -689,7 +924,31 @@ curl -X POST "http://127.0.0.1:8000/admin/products" \
   }'
 ```
 
-### Crear producto con variantes:
+### Crear producto con variantes simples:
+```bash
+curl -X POST "http://127.0.0.1:8000/admin/products" \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "seller_sku": "PEROXIDO-001",
+    "name": "Peróxido Profesional",
+    "regular_price": 6.99,
+    "has_variants": true,
+    "variant_groups": [
+      {
+        "variant_type": "Volumen",
+        "name": null,
+        "variants": [
+          {"name": "Vol 10", "seller_sku": "PER-V10", "stock": 100},
+          {"name": "Vol 20", "seller_sku": "PER-V20", "stock": 80},
+          {"name": "Vol 30", "seller_sku": "PER-V30", "stock": 60}
+        ]
+      }
+    ]
+  }'
+```
+
+### Crear producto con variantes y categorías:
 ```bash
 curl -X POST "http://127.0.0.1:8000/admin/products" \
   -H "Authorization: Bearer <token>" \
@@ -701,10 +960,18 @@ curl -X POST "http://127.0.0.1:8000/admin/products" \
     "has_variants": true,
     "variant_groups": [
       {
+        "variant_type": "Color",
         "name": "Naturales",
         "variants": [
           {"name": "Rubio", "seller_sku": "TINTE-RUB", "stock": 50},
           {"name": "Castaño", "seller_sku": "TINTE-CAS", "stock": 30}
+        ]
+      },
+      {
+        "variant_type": "Color",
+        "name": "Fantasías",
+        "variants": [
+          {"name": "Azul", "seller_sku": "TINTE-AZU", "stock": 20}
         ]
       }
     ]

@@ -7,7 +7,8 @@ class ProductVariantPublic(BaseModel):
     """Localized variant for public frontend"""
     id: int
     seller_sku: Optional[str] = None
-    name: str  # Localized name
+    name: str  # Display name
+    variant_value: Optional[str] = None  # Clean value for filters
     regular_price: Optional[float] = None
     sale_price: Optional[float] = None
     stock: Optional[int] = None
@@ -18,14 +19,22 @@ class ProductVariantPublic(BaseModel):
         from_attributes = True
 
 
-class ProductVariantGroupPublic(BaseModel):
-    """Localized variant group for public frontend"""
+class VariantCategoryPublic(BaseModel):
+    """Category within a variant type for public frontend"""
     id: int
-    name: str  # Localized name
+    name: str
     variants: List[ProductVariantPublic] = []
 
-    class Config:
-        from_attributes = True
+
+class VariantTypePublic(BaseModel):
+    """
+    Grouped variant type for public frontend.
+    - If categories is not None: variants are organized by category
+    - If categories is None: variants are direct (simple variants)
+    """
+    type: str  # e.g., "Color", "Tamaño", "Volumen"
+    categories: Optional[List[VariantCategoryPublic]] = None  # null = simple variants
+    variants: Optional[List[ProductVariantPublic]] = None  # Only when categories is null
 
 
 class ProductPublic(BaseModel):
@@ -52,7 +61,7 @@ class ProductPublic(BaseModel):
     currency: Optional[str] = None
     has_variants: Optional[bool] = None
     brand: Optional[str] = None
-    variant_groups: List[ProductVariantGroupPublic] = []
+    variant_types: List[VariantTypePublic] = []  # Grouped by variant_type
 
     class Config:
         from_attributes = True

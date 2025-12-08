@@ -15,6 +15,7 @@ from schemas.admin import (
     ProductCreate, ProductUpdate, ProductAdminResponse,
     ProductVariantCreate, ProductVariantUpdate, ProductVariantResponse,
     ProductVariantGroupCreate, ProductVariantGroupResponse,
+    VariantTypeResponse, VariantCategoryResponse,
     ProductBulkCreate, ProductBulkResponse, ProductBulkError,
     ProductBulkDelete, ProductBulkDeleteResponse, ProductBulkDeleteError,
     ProductBulkUpdate, ProductBulkUpdateItem, ProductBulkUpdateResponse, ProductBulkUpdateError,
@@ -328,7 +329,8 @@ def create_product(data: ProductCreate, db: Session) -> ProductAdminResponse:
             variants_data = group_data.variants
             group = ProductVariantGroup(
                 product_id=product.id,
-                name=group_data.name,
+                variant_type=group_data.variant_type,  # REQUIRED
+                name=group_data.name,  # OPTIONAL (category)
                 display_order=group_data.display_order
             )
             db.add(group)
@@ -337,9 +339,13 @@ def create_product(data: ProductCreate, db: Session) -> ProductAdminResponse:
             
             # Create variants for this group
             for variant_data in variants_data:
+                variant_dict = variant_data.model_dump()
+                # Default variant_value to name if not provided
+                if not variant_dict.get('variant_value'):
+                    variant_dict['variant_value'] = variant_dict['name']
                 variant = ProductVariant(
                     group_id=group.id,
-                    **variant_data.model_dump()
+                    **variant_dict
                 )
                 db.add(variant)
         
@@ -410,7 +416,8 @@ def update_product(product_id: int, data: ProductUpdate, db: Session) -> Product
                 variants_data = group_data.variants
                 group = ProductVariantGroup(
                     product_id=product.id,
-                    name=group_data.name,
+                    variant_type=group_data.variant_type,  # REQUIRED
+                    name=group_data.name,  # OPTIONAL (category)
                     display_order=group_data.display_order
                 )
                 db.add(group)
@@ -418,9 +425,13 @@ def update_product(product_id: int, data: ProductUpdate, db: Session) -> Product
                 
                 # Create variants for this group
                 for variant_data in variants_data:
+                    variant_dict = variant_data.model_dump()
+                    # Default variant_value to name if not provided
+                    if not variant_dict.get('variant_value'):
+                        variant_dict['variant_value'] = variant_dict['name']
                     variant = ProductVariant(
                         group_id=group.id,
-                        **variant_data.model_dump()
+                        **variant_dict
                     )
                     db.add(variant)
         else:
@@ -437,17 +448,51 @@ def update_product(product_id: int, data: ProductUpdate, db: Session) -> Product
 
 def _product_to_response(product: Product) -> ProductAdminResponse:
     """Convert product model to admin response with all language fields"""
-    variant_groups = []
+    variant_types = []
+    
     if product.has_variants and product.variant_groups:
+        # Group by variant_type
+        grouped_by_type = {}
         for group in sorted(product.variant_groups, key=lambda g: g.display_order):
-            variants = [ProductVariantResponse.model_validate(v) for v in sorted(group.variants, key=lambda v: v.display_order)]
-            variant_groups.append(ProductVariantGroupResponse(
-                id=group.id,
-                product_id=group.product_id,
-                name=group.name,
-                display_order=group.display_order,
-                variants=variants
-            ))
+            vtype = group.variant_type or "General"
+            if vtype not in grouped_by_type:
+                grouped_by_type[vtype] = []
+            grouped_by_type[vtype].append(group)
+        
+        # Build variant_types response
+        for vtype, groups in grouped_by_type.items():
+            # Check if this type has categories or is simple
+            # Simple = single group with name=null OR name equals variant_type
+            is_simple = (
+                len(groups) == 1 and 
+                (not groups[0].name or groups[0].name == vtype)
+            )
+            
+            if not is_simple:
+                # Has categories - build categories list
+                categories = []
+                for group in groups:
+                    variants = [ProductVariantResponse.model_validate(v) for v in sorted(group.variants, key=lambda v: v.display_order)]
+                    categories.append(VariantCategoryResponse(
+                        id=group.id,
+                        name=group.name or vtype,  # Use variant_type as fallback name
+                        display_order=group.display_order,
+                        variants=variants
+                    ))
+                variant_types.append(VariantTypeResponse(
+                    type=vtype,
+                    categories=categories,
+                    variants=None
+                ))
+            else:
+                # Simple variants (single group with name=null)
+                group = groups[0]
+                variants = [ProductVariantResponse.model_validate(v) for v in sorted(group.variants, key=lambda v: v.display_order)]
+                variant_types.append(VariantTypeResponse(
+                    type=vtype,
+                    categories=None,
+                    variants=variants
+                ))
     
     return ProductAdminResponse(
         id=product.id,
@@ -480,7 +525,7 @@ def _product_to_response(product: Product) -> ProductAdminResponse:
         # Timestamps
         created_at=product.created_at,
         updated_at=product.updated_at,
-        variant_groups=variant_groups
+        variant_types=variant_types
     )
 
 
@@ -600,7 +645,8 @@ def bulk_update_products(data: ProductBulkUpdate, db: Session) -> ProductBulkUpd
                         variants_data = group_data.variants
                         group = ProductVariantGroup(
                             product_id=product.id,
-                            name=group_data.name,
+                            variant_type=group_data.variant_type,  # REQUIRED
+                            name=group_data.name,  # OPTIONAL (category)
                             display_order=group_data.display_order
                         )
                         db.add(group)
@@ -608,9 +654,13 @@ def bulk_update_products(data: ProductBulkUpdate, db: Session) -> ProductBulkUpd
                         
                         # Create variants for this group
                         for variant_data in variants_data:
+                            variant_dict = variant_data.model_dump()
+                            # Default variant_value to name if not provided
+                            if not variant_dict.get('variant_value'):
+                                variant_dict['variant_value'] = variant_dict['name']
                             variant = ProductVariant(
                                 group_id=group.id,
-                                **variant_data.model_dump()
+                                **variant_dict
                             )
                             db.add(variant)
                 else:
@@ -653,7 +703,8 @@ def add_variant_group(product_id: int, data: ProductVariantGroupCreate, db: Sess
     # Create the group
     group = ProductVariantGroup(
         product_id=product.id,
-        name=data.name,
+        variant_type=data.variant_type,  # REQUIRED
+        name=data.name,  # OPTIONAL (category)
         display_order=data.display_order
     )
     db.add(group)
@@ -661,9 +712,13 @@ def add_variant_group(product_id: int, data: ProductVariantGroupCreate, db: Sess
     
     # Create variants
     for variant_data in data.variants:
+        variant_dict = variant_data.model_dump()
+        # Default variant_value to name if not provided
+        if not variant_dict.get('variant_value'):
+            variant_dict['variant_value'] = variant_dict['name']
         variant = ProductVariant(
             group_id=group.id,
-            **variant_data.model_dump()
+            **variant_dict
         )
         db.add(variant)
     
@@ -678,7 +733,8 @@ def add_variant_group(product_id: int, data: ProductVariantGroupCreate, db: Sess
     return ProductVariantGroupResponse(
         id=group.id,
         product_id=group.product_id,
-        name=group.name,
+        variant_type=group.variant_type,  # REQUIRED
+        name=group.name,  # OPTIONAL (category)
         display_order=group.display_order,
         variants=variants
     )
@@ -690,9 +746,14 @@ def add_variant_to_group(group_id: int, data: ProductVariantCreate, db: Session)
     if not group:
         raise HTTPException(status_code=404, detail="Variant group not found")
     
+    variant_dict = data.model_dump()
+    # Default variant_value to name if not provided
+    if not variant_dict.get('variant_value'):
+        variant_dict['variant_value'] = variant_dict['name']
+    
     variant = ProductVariant(
         group_id=group.id,
-        **data.model_dump()
+        **variant_dict
     )
     db.add(variant)
     

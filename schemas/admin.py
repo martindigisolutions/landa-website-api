@@ -58,7 +58,9 @@ class TokenResponse(BaseModel):
 
 class ProductVariantCreate(BaseModel):
     seller_sku: Optional[str] = None
-    name: str  # e.g., "Rubio", "Azul"
+    name: str  # Display name e.g., "Rubio", "Azul", "Vol 10"
+    variant_value: Optional[str] = None  # Clean value for filters (defaults to name if not provided)
+    barcode: Optional[str] = None  # Barcode/UPC for scanning
     attributes: dict = {}  # Additional attributes if needed
     regular_price: Optional[float] = None  # Override parent price
     sale_price: Optional[float] = None
@@ -66,6 +68,7 @@ class ProductVariantCreate(BaseModel):
     is_in_stock: bool = True
     image_url: Optional[str] = None
     display_order: int = 0
+    active: bool = True  # Soft delete without removing
 
 
 class ProductVariantResponse(BaseModel):
@@ -73,6 +76,8 @@ class ProductVariantResponse(BaseModel):
     group_id: int
     seller_sku: Optional[str] = None
     name: str
+    variant_value: Optional[str] = None
+    barcode: Optional[str] = None
     attributes: dict = {}
     regular_price: Optional[float] = None
     sale_price: Optional[float] = None
@@ -80,13 +85,15 @@ class ProductVariantResponse(BaseModel):
     is_in_stock: Optional[bool] = None
     image_url: Optional[str] = None
     display_order: int = 0
+    active: bool = True
 
     class Config:
         from_attributes = True
 
 
 class ProductVariantGroupCreate(BaseModel):
-    name: str  # e.g., "Naturales", "Fantasías"
+    variant_type: str  # REQUIRED: e.g., "Color", "Tamaño", "Volumen"
+    name: Optional[str] = None  # OPTIONAL: Category name e.g., "Naturales", "Fantasías" (null = simple variants)
     display_order: int = 0
     variants: List[ProductVariantCreate] = []
 
@@ -94,6 +101,8 @@ class ProductVariantGroupCreate(BaseModel):
 class ProductVariantUpdate(BaseModel):
     seller_sku: Optional[str] = None
     name: Optional[str] = None
+    variant_value: Optional[str] = None
+    barcode: Optional[str] = None
     attributes: Optional[dict] = None
     regular_price: Optional[float] = None
     sale_price: Optional[float] = None
@@ -101,6 +110,7 @@ class ProductVariantUpdate(BaseModel):
     is_in_stock: Optional[bool] = None
     image_url: Optional[str] = None
     display_order: Optional[int] = None
+    active: Optional[bool] = None
 
 
 class VariantBulkDelete(BaseModel):
@@ -119,14 +129,37 @@ class VariantBulkDeleteResponse(BaseModel):
 
 
 class ProductVariantGroupResponse(BaseModel):
+    """Used internally and for individual group endpoints"""
     id: int
     product_id: int
-    name: str
+    variant_type: str  # e.g., "Color", "Tamaño", "Volumen"
+    name: Optional[str] = None  # Category name (null = simple variants)
     display_order: int = 0
     variants: List[ProductVariantResponse] = []
 
     class Config:
         from_attributes = True
+
+
+# ---------- Grouped Variant Response (for product detail) ----------
+
+class VariantCategoryResponse(BaseModel):
+    """Category within a variant type (e.g., 'Naturales' within 'Color')"""
+    id: int
+    name: str
+    display_order: int = 0
+    variants: List[ProductVariantResponse] = []
+
+
+class VariantTypeResponse(BaseModel):
+    """
+    Grouped variant type response.
+    - If categories is not None: variants are organized by category
+    - If categories is None: variants are direct (simple variants)
+    """
+    type: str  # e.g., "Color", "Tamaño", "Volumen"
+    categories: Optional[List[VariantCategoryResponse]] = None  # null = simple variants
+    variants: Optional[List[ProductVariantResponse]] = None  # Only when categories is null
 
 
 # ---------- Product Schemas ----------
@@ -234,7 +267,8 @@ class ProductAdminResponse(BaseModel):
     # Timestamps
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
-    variant_groups: List[ProductVariantGroupResponse] = []  # Included when has_variants=True
+    # Variants grouped by type (new structure)
+    variant_types: List[VariantTypeResponse] = []  # Grouped by variant_type
 
     class Config:
         from_attributes = True
