@@ -9,10 +9,15 @@ from sqlalchemy import func
 from jose import jwt, JWTError
 
 from database import get_db
-from models import Application, Product, Order, OrderItem, User, SingleAccessToken
+from models import Application, Product, ProductVariantGroup, ProductVariant, Order, OrderItem, User, SingleAccessToken
 from schemas.admin import (
     ApplicationCreate, ApplicationUpdate, ApplicationResponse, ApplicationCreatedResponse,
     ProductCreate, ProductUpdate, ProductAdminResponse,
+    ProductVariantCreate, ProductVariantResponse,
+    ProductVariantGroupCreate, ProductVariantGroupResponse,
+    ProductBulkCreate, ProductBulkResponse, ProductBulkError,
+    ProductBulkDelete, ProductBulkDeleteResponse, ProductBulkDeleteError,
+    ProductBulkUpdate, ProductBulkUpdateItem, ProductBulkUpdateResponse, ProductBulkUpdateError,
     OrderAdminResponse, OrderItemResponse, OrderStatusUpdate, PaginatedOrdersResponse,
     AdminStats,
     UserAdminCreate, UserAdminResponse, UserAdminCreatedResponse, PaginatedUsersResponse,
@@ -302,12 +307,78 @@ def authenticate_application(client_id: str, client_secret: str, db: Session) ->
 # ---------- Product Management ----------
 
 def create_product(data: ProductCreate, db: Session) -> ProductAdminResponse:
-    """Create a new product"""
-    product = Product(**data.model_dump())
+    """Create a new product with optional variant groups"""
+    # Extract variant groups before creating product
+    variant_groups_data = data.variant_groups
+    product_data = data.model_dump(exclude={'variant_groups'})
+    
+    # If variant groups provided, set has_variants to True
+    if variant_groups_data:
+        product_data['has_variants'] = True
+    
+    product = Product(**product_data)
     db.add(product)
     db.commit()
     db.refresh(product)
-    return ProductAdminResponse.model_validate(product)
+    
+    # Create variant groups and variants if provided
+    if variant_groups_data:
+        for group_data in variant_groups_data:
+            variants_data = group_data.variants
+            group = ProductVariantGroup(
+                product_id=product.id,
+                name=group_data.name,
+                display_order=group_data.display_order
+            )
+            db.add(group)
+            db.commit()
+            db.refresh(group)
+            
+            # Create variants for this group
+            for variant_data in variants_data:
+                variant = ProductVariant(
+                    group_id=group.id,
+                    **variant_data.model_dump()
+                )
+                db.add(variant)
+        
+        db.commit()
+        db.refresh(product)
+    
+    return _product_to_response(product)
+
+
+def bulk_create_products(data: ProductBulkCreate, db: Session) -> ProductBulkResponse:
+    """Create multiple products at once"""
+    created_products = []
+    errors = []
+    
+    for index, product_data in enumerate(data.products):
+        try:
+            product = create_product(product_data, db)
+            created_products.append(product)
+        except HTTPException as e:
+            errors.append(ProductBulkError(
+                index=index,
+                seller_sku=product_data.seller_sku,
+                error=e.detail
+            ))
+        except Exception as e:
+            error_msg = str(e)
+            if "UNIQUE constraint" in error_msg:
+                error_msg = "SKU already exists"
+            errors.append(ProductBulkError(
+                index=index,
+                seller_sku=product_data.seller_sku,
+                error=error_msg
+            ))
+    
+    return ProductBulkResponse(
+        created=len(created_products),
+        failed=len(errors),
+        errors=errors,
+        products=created_products
+    )
 
 
 def update_product(product_id: int, data: ProductUpdate, db: Session) -> ProductAdminResponse:
@@ -320,9 +391,84 @@ def update_product(product_id: int, data: ProductUpdate, db: Session) -> Product
     for field, value in update_data.items():
         setattr(product, field, value)
     
+    # Force updated_at to update
+    product.updated_at = datetime.utcnow()
+    
     db.commit()
     db.refresh(product)
-    return ProductAdminResponse.model_validate(product)
+    return _product_to_response(product)
+
+
+def _product_to_response(product: Product) -> ProductAdminResponse:
+    """Convert product model to response with variant groups"""
+    variant_groups = []
+    if product.has_variants and product.variant_groups:
+        for group in sorted(product.variant_groups, key=lambda g: g.display_order):
+            variants = [ProductVariantResponse.model_validate(v) for v in sorted(group.variants, key=lambda v: v.display_order)]
+            variant_groups.append(ProductVariantGroupResponse(
+                id=group.id,
+                product_id=group.product_id,
+                name=group.name,
+                display_order=group.display_order,
+                variants=variants
+            ))
+    
+    return ProductAdminResponse(
+        id=product.id,
+        seller_sku=product.seller_sku,
+        name=product.name,
+        short_description=product.short_description,
+        description=product.description,
+        regular_price=product.regular_price,
+        sale_price=product.sale_price,
+        stock=product.stock,
+        is_in_stock=product.is_in_stock,
+        restock_date=product.restock_date,
+        is_favorite=product.is_favorite,
+        notify_when_available=product.notify_when_available,
+        image_url=product.image_url,
+        currency=product.currency,
+        low_stock_threshold=product.low_stock_threshold,
+        has_variants=product.has_variants,
+        brand=product.brand,
+        created_at=product.created_at,
+        updated_at=product.updated_at,
+        variant_groups=variant_groups
+    )
+
+
+def list_products(
+    db: Session,
+    search: Optional[str] = None,
+    brand: Optional[str] = None,
+    is_in_stock: Optional[bool] = None
+) -> List[ProductAdminResponse]:
+    """List all products with optional filters"""
+    query = db.query(Product)
+    
+    if search:
+        search_filter = f"%{search}%"
+        query = query.filter(
+            (Product.name.ilike(search_filter)) |
+            (Product.brand.ilike(search_filter))
+        )
+    
+    if brand:
+        query = query.filter(Product.brand == brand)
+    
+    if is_in_stock is not None:
+        query = query.filter(Product.is_in_stock == is_in_stock)
+    
+    products = query.order_by(Product.name).all()
+    return [_product_to_response(p) for p in products]
+
+
+def get_product(product_id: int, db: Session) -> ProductAdminResponse:
+    """Get a single product by ID"""
+    product = db.query(Product).filter(Product.id == product_id).first()
+    if not product:
+        raise HTTPException(status_code=404, detail="Product not found")
+    return _product_to_response(product)
 
 
 def delete_product(product_id: int, db: Session) -> dict:
@@ -334,6 +480,85 @@ def delete_product(product_id: int, db: Session) -> dict:
     db.delete(product)
     db.commit()
     return {"msg": f"Product '{product.name}' deleted successfully"}
+
+
+def bulk_delete_products(data: ProductBulkDelete, db: Session) -> ProductBulkDeleteResponse:
+    """Delete multiple products at once"""
+    deleted_count = 0
+    errors = []
+    
+    for product_id in data.product_ids:
+        product = db.query(Product).filter(Product.id == product_id).first()
+        if not product:
+            errors.append(ProductBulkDeleteError(
+                id=product_id,
+                error="Product not found"
+            ))
+            continue
+        
+        try:
+            db.delete(product)
+            db.commit()
+            deleted_count += 1
+        except Exception as e:
+            db.rollback()
+            errors.append(ProductBulkDeleteError(
+                id=product_id,
+                error=str(e)
+            ))
+    
+    return ProductBulkDeleteResponse(
+        deleted=deleted_count,
+        failed=len(errors),
+        errors=errors
+    )
+
+
+def bulk_update_products(data: ProductBulkUpdate, db: Session) -> ProductBulkUpdateResponse:
+    """Update multiple products at once (for inventory, prices, etc.)"""
+    updated_products = []
+    errors = []
+    
+    for item in data.products:
+        product = db.query(Product).filter(Product.id == item.id).first()
+        if not product:
+            errors.append(ProductBulkUpdateError(
+                id=item.id,
+                seller_sku=item.seller_sku,
+                error="Product not found"
+            ))
+            continue
+        
+        try:
+            # Update only provided fields
+            update_data = item.model_dump(exclude={'id'}, exclude_unset=True)
+            for field, value in update_data.items():
+                if value is not None:
+                    setattr(product, field, value)
+            
+            # Force updated_at to update
+            product.updated_at = datetime.utcnow()
+            
+            db.commit()
+            db.refresh(product)
+            updated_products.append(_product_to_response(product))
+        except Exception as e:
+            db.rollback()
+            error_msg = str(e)
+            if "UNIQUE constraint" in error_msg:
+                error_msg = "SKU already exists"
+            errors.append(ProductBulkUpdateError(
+                id=item.id,
+                seller_sku=item.seller_sku,
+                error=error_msg
+            ))
+    
+    return ProductBulkUpdateResponse(
+        updated=len(updated_products),
+        failed=len(errors),
+        errors=errors,
+        products=updated_products
+    )
 
 
 # ---------- Order Management ----------

@@ -54,7 +54,58 @@ class TokenResponse(BaseModel):
 
 # ---------- Product Admin Schemas ----------
 
+# ---------- Product Variant Schemas ----------
+
+class ProductVariantCreate(BaseModel):
+    seller_sku: Optional[str] = None
+    name: str  # e.g., "Rubio", "Azul"
+    attributes: dict = {}  # Additional attributes if needed
+    regular_price: Optional[float] = None  # Override parent price
+    sale_price: Optional[float] = None
+    stock: int = 0
+    is_in_stock: bool = True
+    image_url: Optional[str] = None
+    display_order: int = 0
+
+
+class ProductVariantResponse(BaseModel):
+    id: int
+    group_id: int
+    seller_sku: Optional[str] = None
+    name: str
+    attributes: dict = {}
+    regular_price: Optional[float] = None
+    sale_price: Optional[float] = None
+    stock: Optional[int] = None
+    is_in_stock: Optional[bool] = None
+    image_url: Optional[str] = None
+    display_order: int = 0
+
+    class Config:
+        from_attributes = True
+
+
+class ProductVariantGroupCreate(BaseModel):
+    name: str  # e.g., "Naturales", "Fantasías"
+    display_order: int = 0
+    variants: List[ProductVariantCreate] = []
+
+
+class ProductVariantGroupResponse(BaseModel):
+    id: int
+    product_id: int
+    name: str
+    display_order: int = 0
+    variants: List[ProductVariantResponse] = []
+
+    class Config:
+        from_attributes = True
+
+
+# ---------- Product Schemas ----------
+
 class ProductCreate(BaseModel):
+    seller_sku: Optional[str] = None  # SKU for dashboard linking
     name: str
     short_description: Optional[str] = None
     description: Optional[str] = None
@@ -70,9 +121,21 @@ class ProductCreate(BaseModel):
     low_stock_threshold: int = 5
     has_variants: bool = False
     brand: Optional[str] = None
+    variant_groups: List[ProductVariantGroupCreate] = []  # Include variant groups on creation
+
+
+class ProductBulkCreate(BaseModel):
+    products: List[ProductCreate]
+
+
+class ProductBulkError(BaseModel):
+    index: int
+    seller_sku: Optional[str] = None
+    error: str
 
 
 class ProductUpdate(BaseModel):
+    seller_sku: Optional[str] = None
     name: Optional[str] = None
     short_description: Optional[str] = None
     description: Optional[str] = None
@@ -92,24 +155,82 @@ class ProductUpdate(BaseModel):
 
 class ProductAdminResponse(BaseModel):
     id: int
+    seller_sku: Optional[str] = None
     name: str
-    short_description: Optional[str]
-    description: Optional[str]
-    regular_price: float
-    sale_price: Optional[float]
-    stock: Optional[int]
-    is_in_stock: bool
-    restock_date: Optional[date]
-    is_favorite: bool
-    notify_when_available: bool
-    image_url: Optional[str]
-    currency: str
-    low_stock_threshold: int
-    has_variants: bool
-    brand: Optional[str]
+    short_description: Optional[str] = None
+    description: Optional[str] = None
+    regular_price: Optional[float] = None
+    sale_price: Optional[float] = None
+    stock: Optional[int] = None
+    is_in_stock: Optional[bool] = None
+    restock_date: Optional[date] = None
+    is_favorite: Optional[bool] = None
+    notify_when_available: Optional[bool] = None
+    image_url: Optional[str] = None
+    currency: Optional[str] = None
+    low_stock_threshold: Optional[int] = None
+    has_variants: Optional[bool] = None
+    brand: Optional[str] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+    variant_groups: List[ProductVariantGroupResponse] = []  # Included when has_variants=True
 
     class Config:
         from_attributes = True
+
+
+class ProductBulkResponse(BaseModel):
+    created: int
+    failed: int
+    errors: List[ProductBulkError] = []
+    products: List[ProductAdminResponse] = []
+
+
+# Bulk Delete
+class ProductBulkDelete(BaseModel):
+    product_ids: List[int]
+
+
+class ProductBulkDeleteError(BaseModel):
+    id: int
+    error: str
+
+
+class ProductBulkDeleteResponse(BaseModel):
+    deleted: int
+    failed: int
+    errors: List[ProductBulkDeleteError] = []
+
+
+# Bulk Update
+class ProductBulkUpdateItem(BaseModel):
+    id: int  # Product ID to update
+    seller_sku: Optional[str] = None
+    name: Optional[str] = None
+    regular_price: Optional[float] = None
+    sale_price: Optional[float] = None
+    stock: Optional[int] = None
+    is_in_stock: Optional[bool] = None
+    low_stock_threshold: Optional[int] = None
+    image_url: Optional[str] = None
+    brand: Optional[str] = None
+
+
+class ProductBulkUpdate(BaseModel):
+    products: List[ProductBulkUpdateItem]
+
+
+class ProductBulkUpdateError(BaseModel):
+    id: int
+    seller_sku: Optional[str] = None
+    error: str
+
+
+class ProductBulkUpdateResponse(BaseModel):
+    updated: int
+    failed: int
+    errors: List[ProductBulkUpdateError] = []
+    products: List[ProductAdminResponse] = []
 
 
 # ---------- Order Admin Schemas ----------
