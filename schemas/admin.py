@@ -171,6 +171,8 @@ class ProductUpdate(BaseModel):
     low_stock_threshold: Optional[int] = None
     has_variants: Optional[bool] = None
     brand: Optional[str] = None
+    # Variants (if provided, replaces all existing variants)
+    variant_groups: Optional[List[ProductVariantGroupCreate]] = None
 
 
 class ProductAdminResponse(BaseModel):
@@ -258,6 +260,8 @@ class ProductBulkUpdateItem(BaseModel):
     image_url: Optional[str] = None
     gallery: Optional[List[str]] = None  # Additional images
     brand: Optional[str] = None
+    # Variants (if provided, replaces all existing variants for this product)
+    variant_groups: Optional[List[ProductVariantGroupCreate]] = None
 
 
 class ProductBulkUpdate(BaseModel):

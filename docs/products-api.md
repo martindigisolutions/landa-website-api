@@ -325,7 +325,32 @@ Content-Type: application/json
 }
 ```
 
-> **Nota:** Este endpoint actualiza solo el producto padre. Para actualizar variantes, ver sección de variantes.
+**Ejemplo actualizando/reemplazando variantes:**
+```json
+{
+  "variant_groups": [
+    {
+      "name": "Naturales",
+      "variants": [
+        {"name": "Rubio", "seller_sku": "TINTE-RUB", "stock": 100},
+        {"name": "Castaño", "seller_sku": "TINTE-CAS", "stock": 50},
+        {"name": "Negro", "seller_sku": "TINTE-NEG", "stock": 30}
+      ]
+    },
+    {
+      "name": "Fantasías",
+      "variants": [
+        {"name": "Azul", "seller_sku": "TINTE-AZU", "stock": 20}
+      ]
+    }
+  ]
+}
+```
+
+> **Comportamiento de variantes:**
+> - Si envías `variant_groups` → **Reemplaza TODAS** las variantes existentes
+> - Si NO envías `variant_groups` → No toca las variantes
+> - Si envías `variant_groups: []` → **Elimina todas** las variantes
 
 ---
 
@@ -473,6 +498,7 @@ Content-Type: application/json
 | `image_url` | string | URL de imagen principal |
 | `gallery` | array | Array de URLs de imágenes adicionales |
 | `brand` | string | Marca |
+| `variant_groups` | array | Reemplaza variantes (ver estructura abajo) |
 
 **Respuesta:**
 ```json

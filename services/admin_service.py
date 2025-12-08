@@ -382,14 +382,49 @@ def bulk_create_products(data: ProductBulkCreate, db: Session) -> ProductBulkRes
 
 
 def update_product(product_id: int, data: ProductUpdate, db: Session) -> ProductAdminResponse:
-    """Update an existing product"""
+    """Update an existing product. If variant_groups is provided, replaces all variants."""
     product = db.query(Product).filter(Product.id == product_id).first()
     if not product:
         raise HTTPException(status_code=404, detail="Product not found")
     
-    update_data = data.model_dump(exclude_unset=True)
+    # Extract variant_groups before processing other fields
+    variant_groups_data = data.variant_groups
+    update_data = data.model_dump(exclude_unset=True, exclude={'variant_groups'})
+    
+    # Update simple fields
     for field, value in update_data.items():
         setattr(product, field, value)
+    
+    # Handle variant_groups if provided (replace all)
+    if variant_groups_data is not None:
+        # Delete existing variant groups (cascade deletes variants)
+        for group in product.variant_groups:
+            db.delete(group)
+        db.flush()
+        
+        # Create new variant groups and variants
+        if variant_groups_data:
+            product.has_variants = True
+            for group_data in variant_groups_data:
+                variants_data = group_data.variants
+                group = ProductVariantGroup(
+                    product_id=product.id,
+                    name=group_data.name,
+                    display_order=group_data.display_order
+                )
+                db.add(group)
+                db.flush()
+                
+                # Create variants for this group
+                for variant_data in variants_data:
+                    variant = ProductVariant(
+                        group_id=group.id,
+                        **variant_data.model_dump()
+                    )
+                    db.add(variant)
+        else:
+            # Empty array = remove all variants
+            product.has_variants = False
     
     # Force updated_at to update
     product.updated_at = datetime.utcnow()
@@ -526,7 +561,7 @@ def bulk_delete_products(data: ProductBulkDelete, db: Session) -> ProductBulkDel
 
 
 def bulk_update_products(data: ProductBulkUpdate, db: Session) -> ProductBulkUpdateResponse:
-    """Update multiple products at once (for inventory, prices, etc.)"""
+    """Update multiple products at once (for inventory, prices, variants, etc.)"""
     updated_products = []
     errors = []
     
@@ -541,11 +576,45 @@ def bulk_update_products(data: ProductBulkUpdate, db: Session) -> ProductBulkUpd
             continue
         
         try:
-            # Update only provided fields
-            update_data = item.model_dump(exclude={'id'}, exclude_unset=True)
+            # Extract variant_groups before processing other fields
+            variant_groups_data = item.variant_groups
+            update_data = item.model_dump(exclude={'id', 'variant_groups'}, exclude_unset=True)
+            
+            # Update simple fields
             for field, value in update_data.items():
                 if value is not None:
                     setattr(product, field, value)
+            
+            # Handle variant_groups if provided (replace all)
+            if variant_groups_data is not None:
+                # Delete existing variant groups (cascade deletes variants)
+                for group in product.variant_groups:
+                    db.delete(group)
+                db.flush()
+                
+                # Create new variant groups and variants
+                if variant_groups_data:
+                    product.has_variants = True
+                    for group_data in variant_groups_data:
+                        variants_data = group_data.variants
+                        group = ProductVariantGroup(
+                            product_id=product.id,
+                            name=group_data.name,
+                            display_order=group_data.display_order
+                        )
+                        db.add(group)
+                        db.flush()
+                        
+                        # Create variants for this group
+                        for variant_data in variants_data:
+                            variant = ProductVariant(
+                                group_id=group.id,
+                                **variant_data.model_dump()
+                            )
+                            db.add(variant)
+                else:
+                    # Empty array = remove all variants
+                    product.has_variants = False
             
             # Force updated_at to update
             product.updated_at = datetime.utcnow()
