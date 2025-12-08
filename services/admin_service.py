@@ -400,7 +400,7 @@ def update_product(product_id: int, data: ProductUpdate, db: Session) -> Product
 
 
 def _product_to_response(product: Product) -> ProductAdminResponse:
-    """Convert product model to response with variant groups"""
+    """Convert product model to admin response with all language fields"""
     variant_groups = []
     if product.has_variants and product.variant_groups:
         for group in sorted(product.variant_groups, key=lambda g: g.display_order):
@@ -416,9 +416,18 @@ def _product_to_response(product: Product) -> ProductAdminResponse:
     return ProductAdminResponse(
         id=product.id,
         seller_sku=product.seller_sku,
+        # Names
         name=product.name,
+        name_en=product.name_en,
+        # Descriptions
         short_description=product.short_description,
+        short_description_en=product.short_description_en,
         description=product.description,
+        description_en=product.description_en,
+        # Tags
+        tags=product.tags,
+        tags_en=product.tags_en,
+        # Pricing & Inventory
         regular_price=product.regular_price,
         sale_price=product.sale_price,
         stock=product.stock,
@@ -427,10 +436,12 @@ def _product_to_response(product: Product) -> ProductAdminResponse:
         is_favorite=product.is_favorite,
         notify_when_available=product.notify_when_available,
         image_url=product.image_url,
+        gallery=product.gallery or [],
         currency=product.currency,
         low_stock_threshold=product.low_stock_threshold,
         has_variants=product.has_variants,
         brand=product.brand,
+        # Timestamps
         created_at=product.created_at,
         updated_at=product.updated_at,
         variant_groups=variant_groups

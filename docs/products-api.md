@@ -1,5 +1,21 @@
 # API de Productos - Documentación para Dashboard
 
+## Localización (i18n)
+
+La API soporta **español (es)** e **inglés (en)** para los campos de texto.
+
+### Para endpoints públicos (`/products`)
+Envía el header `Accept-Language`:
+```
+Accept-Language: en  → Respuesta en inglés
+Accept-Language: es  → Respuesta en español (default)
+```
+
+### Para endpoints admin (`/admin/products`)
+Devuelve **todos los campos** en ambos idiomas para que el dashboard pueda editarlos.
+
+---
+
 ## Autenticación
 
 Todos los endpoints requieren un token Bearer obtenido via OAuth2:
@@ -73,8 +89,13 @@ GET /admin/products?brand=L'Oreal&is_in_stock=true
     "id": 1,
     "seller_sku": "SHMP-001",
     "name": "Shampoo Profesional",
+    "name_en": "Professional Shampoo",
     "short_description": "Para cabello seco",
+    "short_description_en": "For dry hair",
     "description": "Descripción larga...",
+    "description_en": "Long description...",
+    "tags": "shampoo;cabello;profesional",
+    "tags_en": "shampoo;hair;professional",
     "regular_price": 29.99,
     "sale_price": 24.99,
     "stock": 100,
@@ -87,6 +108,8 @@ GET /admin/products?brand=L'Oreal&is_in_stock=true
     "low_stock_threshold": 5,
     "has_variants": false,
     "brand": "L'Oreal",
+    "created_at": "2025-12-01T10:00:00",
+    "updated_at": "2025-12-08T15:30:00",
     "variant_groups": []
   }
 ]
@@ -123,8 +146,13 @@ Content-Type: application/json
 {
   "seller_sku": "SHMP-001",
   "name": "Shampoo Profesional",
+  "name_en": "Professional Shampoo",
   "short_description": "Para cabello seco",
+  "short_description_en": "For dry hair",
   "description": "Descripción larga del producto...",
+  "description_en": "Long product description...",
+  "tags": "shampoo;cabello;profesional",
+  "tags_en": "shampoo;hair;professional",
   "regular_price": 29.99,
   "sale_price": 24.99,
   "stock": 100,
@@ -145,19 +173,30 @@ Content-Type: application/json
 | Campo | Tipo | Requerido | Default | Descripción |
 |-------|------|-----------|---------|-------------|
 | `seller_sku` | string | No | null | SKU único para enlazar con dashboard |
-| `name` | string | **Sí** | - | Nombre del producto |
-| `short_description` | string | No | null | Descripción corta |
-| `description` | string | No | null | Descripción larga |
+| **Nombres** |
+| `name` | string | **Sí** | - | Nombre/título del producto (español) |
+| `name_en` | string | No | null | Nombre/título del producto (inglés) |
+| **Descripciones** |
+| `short_description` | string | No | null | Descripción corta (español) |
+| `short_description_en` | string | No | null | Descripción corta (inglés) |
+| `description` | string | No | null | Descripción larga (español) |
+| `description_en` | string | No | null | Descripción larga (inglés) |
+| **Tags** |
+| `tags` | string | No | null | Tags separados por `;` (español) |
+| `tags_en` | string | No | null | Tags separados por `;` (inglés) |
+| **Precios e Inventario** |
 | `regular_price` | float | **Sí** | - | Precio regular |
 | `sale_price` | float | No | null | Precio de oferta |
 | `stock` | int | No | 0 | Cantidad en inventario |
 | `is_in_stock` | bool | No | true | Disponibilidad |
-| `restock_date` | date | No | null | Fecha de reabastecimiento (YYYY-MM-DD) |
+| `restock_date` | date | No | null | Fecha reabastecimiento (YYYY-MM-DD) |
+| `low_stock_threshold` | int | No | 5 | Umbral de stock bajo |
+| **Display** |
 | `is_favorite` | bool | No | false | Marcar como favorito |
 | `notify_when_available` | bool | No | false | Notificar disponibilidad |
-| `image_url` | string | No | null | URL de imagen |
+| `image_url` | string | No | null | URL de imagen principal |
+| `gallery` | array | No | [] | Array de URLs de imágenes adicionales |
 | `currency` | string | No | "USD" | Moneda |
-| `low_stock_threshold` | int | No | 5 | Umbral de stock bajo |
 | `has_variants` | bool | No | false | Tiene variantes |
 | `brand` | string | No | null | Marca |
 
@@ -274,6 +313,15 @@ Content-Type: application/json
   "sale_price": 29.99,
   "stock": 50,
   "is_in_stock": true
+}
+```
+
+**Ejemplo actualizando traducciones:**
+```json
+{
+  "name_en": "Professional Shampoo Updated",
+  "description_en": "New English description...",
+  "tags_en": "shampoo;hair;dry"
 }
 ```
 
@@ -405,13 +453,25 @@ Content-Type: application/json
 |-------|------|-------------|
 | `id` | int | **Requerido.** ID del producto a actualizar |
 | `seller_sku` | string | SKU del producto |
-| `name` | string | Nombre del producto |
+| **Nombres** |
+| `name` | string | Nombre del producto (español) |
+| `name_en` | string | Nombre del producto (inglés) |
+| **Descripciones** |
+| `short_description` | string | Descripción corta (español) |
+| `short_description_en` | string | Descripción corta (inglés) |
+| `description` | string | Descripción completa (español) |
+| `description_en` | string | Descripción completa (inglés) |
+| **Tags** |
+| `tags` | string | Tags separados por `;` (español) |
+| `tags_en` | string | Tags separados por `;` (inglés) |
+| **Precios e Inventario** |
 | `regular_price` | float | Precio regular |
 | `sale_price` | float | Precio de oferta |
 | `stock` | int | Cantidad en inventario |
 | `is_in_stock` | bool | Disponibilidad |
 | `low_stock_threshold` | int | Umbral de stock bajo |
-| `image_url` | string | URL de imagen |
+| `image_url` | string | URL de imagen principal |
+| `gallery` | array | Array de URLs de imágenes adicionales |
 | `brand` | string | Marca |
 
 **Respuesta:**
@@ -681,3 +741,43 @@ curl -X DELETE "http://127.0.0.1:8000/admin/products/1" \
   -H "Authorization: Bearer <token>"
 ```
 
+---
+
+## Campos de Localización (i18n)
+
+### Campos con soporte multiidioma
+
+| Campo Base | Español | Inglés | Descripción |
+|------------|---------|--------|-------------|
+| Nombre | `name` | `name_en` | Nombre/título del producto |
+| Desc. corta | `short_description` | `short_description_en` | Descripción corta |
+| Descripción | `description` | `description_en` | Descripción completa |
+| Tags | `tags` | `tags_en` | Etiquetas para búsqueda (separadas por `;`) |
+
+### Comportamiento
+
+1. **Endpoints Admin** (`/admin/products`): Devuelven **todos** los campos en ambos idiomas
+2. **Endpoints Públicos** (`/products`): Devuelven campos según `Accept-Language` header
+3. **Fallback**: Si no hay traducción en inglés, se usa el español
+
+### Ejemplo de sincronización con Dashboard
+
+```python
+# Desde Django, enviar producto con traducciones
+payload = {
+    "seller_sku": "PROD-001",
+    "name": "Shampoo Profesional",
+    "name_en": "Professional Shampoo",
+    "description": "Descripción en español...",
+    "description_en": "English description...",
+    "tags": "shampoo;cabello;seco",
+    "tags_en": "shampoo;hair;dry",
+    "regular_price": 29.99
+}
+
+response = requests.post(
+    "http://api/admin/products",
+    json=payload,
+    headers={"Authorization": f"Bearer {token}"}
+)
+```

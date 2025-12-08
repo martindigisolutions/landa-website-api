@@ -38,21 +38,41 @@ class Product(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     seller_sku = Column(String, unique=True, index=True, nullable=True)  # SKU for dashboard linking
-    name = Column(String, nullable=False)
-    short_description = Column(String)
-    description = Column(String)
+    
+    # Names (commercial title from dashboard)
+    name = Column(String, nullable=False)  # Spanish (default)
+    name_en = Column(String, nullable=True)  # English
+    
+    # Descriptions
+    short_description = Column(String, nullable=True)  # Spanish
+    short_description_en = Column(String, nullable=True)  # English
+    description = Column(String, nullable=True)  # Spanish
+    description_en = Column(String, nullable=True)  # English
+    
+    # Tags for search
+    tags = Column(String, nullable=True)  # Spanish (semicolon separated)
+    tags_en = Column(String, nullable=True)  # English (semicolon separated)
+    
+    # Pricing
     regular_price = Column(Float)
-    sale_price = Column(Float)
-    stock = Column(Integer)
-    is_in_stock = Column(Boolean)
+    sale_price = Column(Float, nullable=True)
+    
+    # Inventory
+    stock = Column(Integer, default=0)
+    is_in_stock = Column(Boolean, default=True)
     restock_date = Column(Date, nullable=True)
-    is_favorite = Column(Boolean)
-    notify_when_available = Column(Boolean)
-    image_url = Column(String)
-    currency = Column(String)
-    low_stock_threshold = Column(Integer)
+    low_stock_threshold = Column(Integer, default=5)
+    
+    # Display
+    is_favorite = Column(Boolean, default=False)
+    notify_when_available = Column(Boolean, default=False)
+    image_url = Column(String, nullable=True)  # Main image
+    gallery = Column(JSON, default=list)  # Array of additional image URLs
+    currency = Column(String, default="USD")
+    
+    # Classification
     has_variants = Column(Boolean, default=False)
-    brand = Column(String)
+    brand = Column(String, nullable=True)
     
     # Timestamps
     created_at = Column(DateTime, default=datetime.utcnow)

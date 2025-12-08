@@ -106,9 +106,18 @@ class ProductVariantGroupResponse(BaseModel):
 
 class ProductCreate(BaseModel):
     seller_sku: Optional[str] = None  # SKU for dashboard linking
-    name: str
-    short_description: Optional[str] = None
-    description: Optional[str] = None
+    # Names (commercial title from dashboard)
+    name: str  # Spanish (required)
+    name_en: Optional[str] = None  # English
+    # Descriptions
+    short_description: Optional[str] = None  # Spanish
+    short_description_en: Optional[str] = None  # English
+    description: Optional[str] = None  # Spanish
+    description_en: Optional[str] = None  # English
+    # Tags
+    tags: Optional[str] = None  # Spanish (semicolon separated)
+    tags_en: Optional[str] = None  # English (semicolon separated)
+    # Pricing & Inventory
     regular_price: float
     sale_price: Optional[float] = None
     stock: Optional[int] = 0
@@ -116,7 +125,8 @@ class ProductCreate(BaseModel):
     restock_date: Optional[date] = None
     is_favorite: bool = False
     notify_when_available: bool = False
-    image_url: Optional[str] = None
+    image_url: Optional[str] = None  # Main image
+    gallery: List[str] = []  # Additional images
     currency: str = "USD"
     low_stock_threshold: int = 5
     has_variants: bool = False
@@ -136,9 +146,18 @@ class ProductBulkError(BaseModel):
 
 class ProductUpdate(BaseModel):
     seller_sku: Optional[str] = None
+    # Names
     name: Optional[str] = None
+    name_en: Optional[str] = None
+    # Descriptions
     short_description: Optional[str] = None
+    short_description_en: Optional[str] = None
     description: Optional[str] = None
+    description_en: Optional[str] = None
+    # Tags
+    tags: Optional[str] = None
+    tags_en: Optional[str] = None
+    # Pricing & Inventory
     regular_price: Optional[float] = None
     sale_price: Optional[float] = None
     stock: Optional[int] = None
@@ -147,6 +166,7 @@ class ProductUpdate(BaseModel):
     is_favorite: Optional[bool] = None
     notify_when_available: Optional[bool] = None
     image_url: Optional[str] = None
+    gallery: Optional[List[str]] = None  # Additional images
     currency: Optional[str] = None
     low_stock_threshold: Optional[int] = None
     has_variants: Optional[bool] = None
@@ -154,11 +174,21 @@ class ProductUpdate(BaseModel):
 
 
 class ProductAdminResponse(BaseModel):
+    """Full product response for admin dashboard (includes all language fields)"""
     id: int
     seller_sku: Optional[str] = None
+    # Names
     name: str
+    name_en: Optional[str] = None
+    # Descriptions
     short_description: Optional[str] = None
+    short_description_en: Optional[str] = None
     description: Optional[str] = None
+    description_en: Optional[str] = None
+    # Tags
+    tags: Optional[str] = None
+    tags_en: Optional[str] = None
+    # Pricing & Inventory
     regular_price: Optional[float] = None
     sale_price: Optional[float] = None
     stock: Optional[int] = None
@@ -167,10 +197,12 @@ class ProductAdminResponse(BaseModel):
     is_favorite: Optional[bool] = None
     notify_when_available: Optional[bool] = None
     image_url: Optional[str] = None
+    gallery: List[str] = []  # Additional images
     currency: Optional[str] = None
     low_stock_threshold: Optional[int] = None
     has_variants: Optional[bool] = None
     brand: Optional[str] = None
+    # Timestamps
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
     variant_groups: List[ProductVariantGroupResponse] = []  # Included when has_variants=True
@@ -206,13 +238,25 @@ class ProductBulkDeleteResponse(BaseModel):
 class ProductBulkUpdateItem(BaseModel):
     id: int  # Product ID to update
     seller_sku: Optional[str] = None
+    # Names
     name: Optional[str] = None
+    name_en: Optional[str] = None
+    # Descriptions
+    short_description: Optional[str] = None
+    short_description_en: Optional[str] = None
+    description: Optional[str] = None
+    description_en: Optional[str] = None
+    # Tags
+    tags: Optional[str] = None
+    tags_en: Optional[str] = None
+    # Pricing & Inventory
     regular_price: Optional[float] = None
     sale_price: Optional[float] = None
     stock: Optional[int] = None
     is_in_stock: Optional[bool] = None
     low_stock_threshold: Optional[int] = None
     image_url: Optional[str] = None
+    gallery: Optional[List[str]] = None  # Additional images
     brand: Optional[str] = None
 
 
