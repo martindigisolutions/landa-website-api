@@ -10,6 +10,9 @@ from schemas.admin import (
     ProductBulkCreate, ProductBulkResponse,
     ProductBulkDelete, ProductBulkDeleteResponse,
     ProductBulkUpdate, ProductBulkUpdateResponse,
+    ProductVariantCreate, ProductVariantUpdate, ProductVariantResponse,
+    ProductVariantGroupCreate, ProductVariantGroupResponse,
+    VariantBulkDelete, VariantBulkDeleteResponse,
     OrderAdminResponse, OrderStatusUpdate, PaginatedOrdersResponse,
     AdminStats,
     UserAdminCreate, UserAdminResponse, UserAdminCreatedResponse, PaginatedUsersResponse,
@@ -221,6 +224,94 @@ def delete_product(
     db: Session = Depends(get_db)
 ):
     return admin_service.delete_product(product_id, db)
+
+
+# ==================== VARIANT MANAGEMENT ====================
+# These endpoints manage individual variants without replacing all variants
+
+@router.post(
+    "/products/{product_id}/variant-groups",
+    response_model=ProductVariantGroupResponse,
+    summary="Add variant group to product",
+    description="Add a new variant group with variants to an existing product."
+)
+def add_variant_group(
+    product_id: int,
+    data: ProductVariantGroupCreate,
+    app=Depends(admin_service.require_scope("products:write")),
+    db: Session = Depends(get_db)
+):
+    return admin_service.add_variant_group(product_id, data, db)
+
+
+@router.post(
+    "/variant-groups/{group_id}/variants",
+    response_model=ProductVariantResponse,
+    summary="Add variant to group",
+    description="Add a single variant to an existing variant group."
+)
+def add_variant_to_group(
+    group_id: int,
+    data: ProductVariantCreate,
+    app=Depends(admin_service.require_scope("products:write")),
+    db: Session = Depends(get_db)
+):
+    return admin_service.add_variant_to_group(group_id, data, db)
+
+
+@router.delete(
+    "/variants/bulk",
+    response_model=VariantBulkDeleteResponse,
+    summary="Delete multiple variants",
+    description="Delete multiple variants at once by their IDs."
+)
+def bulk_delete_variants(
+    data: VariantBulkDelete,
+    app=Depends(admin_service.require_scope("products:write")),
+    db: Session = Depends(get_db)
+):
+    return admin_service.bulk_delete_variants(data, db)
+
+
+@router.put(
+    "/variants/{variant_id}",
+    response_model=ProductVariantResponse,
+    summary="Update variant",
+    description="Update a single variant. Only provided fields will be updated."
+)
+def update_variant(
+    variant_id: int,
+    data: ProductVariantUpdate,
+    app=Depends(admin_service.require_scope("products:write")),
+    db: Session = Depends(get_db)
+):
+    return admin_service.update_variant(variant_id, data, db)
+
+
+@router.delete(
+    "/variants/{variant_id}",
+    summary="Delete variant",
+    description="Delete a single variant from a group."
+)
+def delete_variant(
+    variant_id: int,
+    app=Depends(admin_service.require_scope("products:write")),
+    db: Session = Depends(get_db)
+):
+    return admin_service.delete_variant(variant_id, db)
+
+
+@router.delete(
+    "/variant-groups/{group_id}",
+    summary="Delete variant group",
+    description="Delete a variant group and all its variants."
+)
+def delete_variant_group(
+    group_id: int,
+    app=Depends(admin_service.require_scope("products:write")),
+    db: Session = Depends(get_db)
+):
+    return admin_service.delete_variant_group(group_id, db)
 
 
 # ==================== ORDER MANAGEMENT ====================

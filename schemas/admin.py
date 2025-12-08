@@ -91,6 +91,33 @@ class ProductVariantGroupCreate(BaseModel):
     variants: List[ProductVariantCreate] = []
 
 
+class ProductVariantUpdate(BaseModel):
+    seller_sku: Optional[str] = None
+    name: Optional[str] = None
+    attributes: Optional[dict] = None
+    regular_price: Optional[float] = None
+    sale_price: Optional[float] = None
+    stock: Optional[int] = None
+    is_in_stock: Optional[bool] = None
+    image_url: Optional[str] = None
+    display_order: Optional[int] = None
+
+
+class VariantBulkDelete(BaseModel):
+    variant_ids: List[int]
+
+
+class VariantBulkDeleteError(BaseModel):
+    id: int
+    error: str
+
+
+class VariantBulkDeleteResponse(BaseModel):
+    deleted: int
+    failed: int
+    errors: List[VariantBulkDeleteError] = []
+
+
 class ProductVariantGroupResponse(BaseModel):
     id: int
     product_id: int

@@ -807,3 +807,143 @@ response = requests.post(
     headers={"Authorization": f"Bearer {token}"}
 )
 ```
+
+---
+
+## Gestión Individual de Variantes
+
+Estos endpoints permiten agregar, actualizar o eliminar variantes sin reemplazar todas las existentes.
+
+### 1. Agregar grupo de variantes a un producto
+
+```http
+POST /admin/products/{product_id}/variant-groups
+Authorization: Bearer <token>
+Content-Type: application/json
+```
+
+**Body:**
+```json
+{
+  "name": "Nuevo Color",
+  "display_order": 2,
+  "variants": [
+    {"name": "Morado", "seller_sku": "TINTE-MOR", "stock": 25},
+    {"name": "Verde", "seller_sku": "TINTE-VER", "stock": 30}
+  ]
+}
+```
+
+---
+
+### 2. Agregar variante a un grupo existente
+
+```http
+POST /admin/variant-groups/{group_id}/variants
+Authorization: Bearer <token>
+Content-Type: application/json
+```
+
+**Body:**
+```json
+{
+  "name": "Platino",
+  "seller_sku": "TINTE-PLA",
+  "stock": 40,
+  "regular_price": 32.99
+}
+```
+
+---
+
+### 3. Actualizar una variante
+
+```http
+PUT /admin/variants/{variant_id}
+Authorization: Bearer <token>
+Content-Type: application/json
+```
+
+**Body (solo campos a actualizar):**
+```json
+{
+  "stock": 100,
+  "regular_price": 29.99,
+  "is_in_stock": true
+}
+```
+
+---
+
+### 4. Eliminar una variante
+
+```http
+DELETE /admin/variants/{variant_id}
+Authorization: Bearer <token>
+```
+
+**Respuesta:**
+```json
+{
+  "msg": "Variant 'Rubio' deleted successfully"
+}
+```
+
+---
+
+### 5. Eliminar un grupo completo
+
+```http
+DELETE /admin/variant-groups/{group_id}
+Authorization: Bearer <token>
+```
+
+**Respuesta:**
+```json
+{
+  "msg": "Variant group 'Naturales' deleted successfully"
+}
+```
+
+> **Nota:** Eliminar un grupo también elimina todas sus variantes.
+
+---
+
+### 6. Eliminar múltiples variantes (Bulk)
+
+```http
+DELETE /admin/variants/bulk
+Authorization: Bearer <token>
+Content-Type: application/json
+```
+
+**Body:**
+```json
+{
+  "variant_ids": [10, 11, 12, 15]
+}
+```
+
+**Respuesta:**
+```json
+{
+  "deleted": 3,
+  "failed": 1,
+  "errors": [
+    {"id": 15, "error": "Variant not found"}
+  ]
+}
+```
+
+---
+
+## Resumen de Endpoints de Variantes
+
+| Método | Endpoint | Descripción |
+|--------|----------|-------------|
+| POST | `/admin/products/{id}/variant-groups` | Agregar grupo con variantes |
+| POST | `/admin/variant-groups/{id}/variants` | Agregar variante a grupo |
+| PUT | `/admin/variants/{id}` | Actualizar variante |
+| DELETE | `/admin/variants/{id}` | Eliminar variante |
+| DELETE | `/admin/variant-groups/{id}` | Eliminar grupo |
+| DELETE | `/admin/variants/bulk` | Eliminar múltiples variantes |

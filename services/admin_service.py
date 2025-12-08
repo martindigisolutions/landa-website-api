@@ -13,11 +13,12 @@ from models import Application, Product, ProductVariantGroup, ProductVariant, Or
 from schemas.admin import (
     ApplicationCreate, ApplicationUpdate, ApplicationResponse, ApplicationCreatedResponse,
     ProductCreate, ProductUpdate, ProductAdminResponse,
-    ProductVariantCreate, ProductVariantResponse,
+    ProductVariantCreate, ProductVariantUpdate, ProductVariantResponse,
     ProductVariantGroupCreate, ProductVariantGroupResponse,
     ProductBulkCreate, ProductBulkResponse, ProductBulkError,
     ProductBulkDelete, ProductBulkDeleteResponse, ProductBulkDeleteError,
     ProductBulkUpdate, ProductBulkUpdateItem, ProductBulkUpdateResponse, ProductBulkUpdateError,
+    VariantBulkDelete, VariantBulkDeleteResponse, VariantBulkDeleteError,
     OrderAdminResponse, OrderItemResponse, OrderStatusUpdate, PaginatedOrdersResponse,
     AdminStats,
     UserAdminCreate, UserAdminResponse, UserAdminCreatedResponse, PaginatedUsersResponse,
@@ -638,6 +639,200 @@ def bulk_update_products(data: ProductBulkUpdate, db: Session) -> ProductBulkUpd
         failed=len(errors),
         errors=errors,
         products=updated_products
+    )
+
+
+# ---------- Variant Management ----------
+
+def add_variant_group(product_id: int, data: ProductVariantGroupCreate, db: Session) -> ProductVariantGroupResponse:
+    """Add a variant group with variants to an existing product"""
+    product = db.query(Product).filter(Product.id == product_id).first()
+    if not product:
+        raise HTTPException(status_code=404, detail="Product not found")
+    
+    # Create the group
+    group = ProductVariantGroup(
+        product_id=product.id,
+        name=data.name,
+        display_order=data.display_order
+    )
+    db.add(group)
+    db.flush()
+    
+    # Create variants
+    for variant_data in data.variants:
+        variant = ProductVariant(
+            group_id=group.id,
+            **variant_data.model_dump()
+        )
+        db.add(variant)
+    
+    # Update product
+    product.has_variants = True
+    product.updated_at = datetime.utcnow()
+    
+    db.commit()
+    db.refresh(group)
+    
+    variants = [ProductVariantResponse.model_validate(v) for v in group.variants]
+    return ProductVariantGroupResponse(
+        id=group.id,
+        product_id=group.product_id,
+        name=group.name,
+        display_order=group.display_order,
+        variants=variants
+    )
+
+
+def add_variant_to_group(group_id: int, data: ProductVariantCreate, db: Session) -> ProductVariantResponse:
+    """Add a single variant to an existing group"""
+    group = db.query(ProductVariantGroup).filter(ProductVariantGroup.id == group_id).first()
+    if not group:
+        raise HTTPException(status_code=404, detail="Variant group not found")
+    
+    variant = ProductVariant(
+        group_id=group.id,
+        **data.model_dump()
+    )
+    db.add(variant)
+    
+    # Update product timestamp
+    product = db.query(Product).filter(Product.id == group.product_id).first()
+    if product:
+        product.updated_at = datetime.utcnow()
+    
+    db.commit()
+    db.refresh(variant)
+    
+    return ProductVariantResponse.model_validate(variant)
+
+
+def update_variant(variant_id: int, data: ProductVariantUpdate, db: Session) -> ProductVariantResponse:
+    """Update a single variant"""
+    variant = db.query(ProductVariant).filter(ProductVariant.id == variant_id).first()
+    if not variant:
+        raise HTTPException(status_code=404, detail="Variant not found")
+    
+    update_data = data.model_dump(exclude_unset=True)
+    for field, value in update_data.items():
+        if value is not None:
+            setattr(variant, field, value)
+    
+    # Update product timestamp
+    group = db.query(ProductVariantGroup).filter(ProductVariantGroup.id == variant.group_id).first()
+    if group:
+        product = db.query(Product).filter(Product.id == group.product_id).first()
+        if product:
+            product.updated_at = datetime.utcnow()
+    
+    db.commit()
+    db.refresh(variant)
+    
+    return ProductVariantResponse.model_validate(variant)
+
+
+def delete_variant(variant_id: int, db: Session) -> dict:
+    """Delete a single variant"""
+    variant = db.query(ProductVariant).filter(ProductVariant.id == variant_id).first()
+    if not variant:
+        raise HTTPException(status_code=404, detail="Variant not found")
+    
+    variant_name = variant.name
+    group_id = variant.group_id
+    
+    db.delete(variant)
+    
+    # Update product timestamp
+    group = db.query(ProductVariantGroup).filter(ProductVariantGroup.id == group_id).first()
+    if group:
+        product = db.query(Product).filter(Product.id == group.product_id).first()
+        if product:
+            product.updated_at = datetime.utcnow()
+            # Check if product still has variants
+            remaining_variants = db.query(ProductVariant).join(ProductVariantGroup).filter(
+                ProductVariantGroup.product_id == product.id
+            ).count()
+            if remaining_variants == 0:
+                product.has_variants = False
+    
+    db.commit()
+    return {"msg": f"Variant '{variant_name}' deleted successfully"}
+
+
+def delete_variant_group(group_id: int, db: Session) -> dict:
+    """Delete a variant group and all its variants"""
+    group = db.query(ProductVariantGroup).filter(ProductVariantGroup.id == group_id).first()
+    if not group:
+        raise HTTPException(status_code=404, detail="Variant group not found")
+    
+    group_name = group.name
+    product_id = group.product_id
+    
+    db.delete(group)  # Cascade deletes variants
+    
+    # Update product
+    product = db.query(Product).filter(Product.id == product_id).first()
+    if product:
+        product.updated_at = datetime.utcnow()
+        # Check if product still has variant groups
+        remaining_groups = db.query(ProductVariantGroup).filter(
+            ProductVariantGroup.product_id == product.id
+        ).count()
+        if remaining_groups == 0:
+            product.has_variants = False
+    
+    db.commit()
+    return {"msg": f"Variant group '{group_name}' deleted successfully"}
+
+
+def bulk_delete_variants(data: VariantBulkDelete, db: Session) -> VariantBulkDeleteResponse:
+    """Delete multiple variants at once"""
+    deleted_count = 0
+    errors = []
+    affected_products = set()
+    
+    for variant_id in data.variant_ids:
+        variant = db.query(ProductVariant).filter(ProductVariant.id == variant_id).first()
+        if not variant:
+            errors.append(VariantBulkDeleteError(
+                id=variant_id,
+                error="Variant not found"
+            ))
+            continue
+        
+        try:
+            # Track affected product
+            group = db.query(ProductVariantGroup).filter(ProductVariantGroup.id == variant.group_id).first()
+            if group:
+                affected_products.add(group.product_id)
+            
+            db.delete(variant)
+            db.flush()
+            deleted_count += 1
+        except Exception as e:
+            errors.append(VariantBulkDeleteError(
+                id=variant_id,
+                error=str(e)
+            ))
+    
+    # Update affected products
+    for product_id in affected_products:
+        product = db.query(Product).filter(Product.id == product_id).first()
+        if product:
+            product.updated_at = datetime.utcnow()
+            # Check if product still has variants
+            remaining_variants = db.query(ProductVariant).join(ProductVariantGroup).filter(
+                ProductVariantGroup.product_id == product.id
+            ).count()
+            if remaining_variants == 0:
+                product.has_variants = False
+    
+    db.commit()
+    
+    return VariantBulkDeleteResponse(
+        deleted=deleted_count,
+        failed=len(errors),
+        errors=errors
     )
 
 
