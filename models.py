@@ -159,11 +159,14 @@ class OrderItem(Base):
     id = Column(Integer, primary_key=True, index=True)
     order_id = Column(Integer, ForeignKey("orders.id"))
     product_id = Column(Integer, ForeignKey("products.id"))
+    variant_id = Column(Integer, ForeignKey("product_variants.id"), nullable=True)  # For products with variants
     quantity = Column(Integer)
     price = Column(Float)  # Precio congelado en el momento de la compra
+    variant_name = Column(String, nullable=True)  # Frozen variant name at purchase time
 
     order = relationship("Order", back_populates="items")
     product = relationship("Product")
+    variant = relationship("ProductVariant")
 
 
 class Application(Base):
