@@ -168,3 +168,124 @@ def get_order_list(db: Session, user_id: Optional[int] = None):
     if user_id:
         query = query.filter(Order.user_id == user_id)
     return query.order_by(Order.created_at.desc()).all()
+
+
+def get_order_detail(order_id: str, user_id: str, db: Session):
+    """Obtener el detalle completo de una orden específica."""
+    try:
+        order_id_int = int(order_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid order ID format")
+    
+    order = db.query(Order).filter(Order.id == order_id_int).first()
+    
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+    
+    # Verificar que el usuario tiene permiso para ver esta orden
+    try:
+        user_id_int = int(user_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid user ID format")
+    
+    if order.user_id != user_id_int:
+        raise HTTPException(status_code=403, detail="You don't have permission to view this order")
+    
+    # Calcular subtotal, shipping_cost y tax
+    subtotal = sum(item.price * item.quantity for item in order.items)
+    
+    # Determinar el costo de envío basado en el método
+    shipping_cost = 0.0
+    if order.shipping_method == "standard":
+        shipping_cost = 5.99
+    elif order.shipping_method in ["free_shipping", "pickup"]:
+        shipping_cost = 0.0
+    
+    # Por ahora, tax = 0 (puede ajustarse según reglas de negocio)
+    tax = 0.0
+    
+    # Construir los items con información del producto
+    items_detail = []
+    for item in order.items:
+        product = db.query(Product).filter(Product.id == item.product_id).first()
+        items_detail.append({
+            "product_id": item.product_id,
+            "name": product.name if product else "Unknown Product",
+            "quantity": item.quantity,
+            "price": item.price,
+            "image_url": product.image_url if product else None
+        })
+    
+    # Construir la dirección
+    address_data = order.address if order.address else {}
+    address = {
+        "city": address_data.get("city", ""),
+        "state": address_data.get("state", ""),
+        "zip": address_data.get("zip", ""),
+        "country": address_data.get("country", ""),
+        "street": address_data.get("street"),
+        "apartment": address_data.get("apartment")
+    } if address_data else None
+    
+    return {
+        "order_id": str(order.id),
+        "status": order.status,
+        "total": order.total,
+        "subtotal": subtotal,
+        "shipping_cost": shipping_cost,
+        "tax": tax,
+        "items": items_detail,
+        "address": address,
+        "shipping_method": order.shipping_method,
+        "payment_method": order.payment_method,
+        "created_at": order.created_at
+    }
+
+
+def update_order_address(order_id: str, user_id: str, address_data: dict, db: Session):
+    """Actualizar la dirección de envío de una orden."""
+    try:
+        order_id_int = int(order_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid order ID format")
+    
+    order = db.query(Order).filter(Order.id == order_id_int).first()
+    
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+    
+    # Verificar que el usuario tiene permiso
+    try:
+        user_id_int = int(user_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid user ID format")
+    
+    if order.user_id != user_id_int:
+        raise HTTPException(status_code=403, detail="You don't have permission to modify this order")
+    
+    # Verificar que el estado permite modificación
+    allowed_statuses = ["pending_payment", "awaiting_verification"]
+    if order.status not in allowed_statuses:
+        raise HTTPException(
+            status_code=409, 
+            detail=f"Cannot update address. Order status '{order.status}' does not allow modifications. Address can only be updated when status is 'pending_payment' or 'awaiting_verification'."
+        )
+    
+    # Actualizar la dirección
+    new_address = {
+        "city": address_data["city"],
+        "state": address_data["state"],
+        "zip": address_data["zip"],
+        "country": address_data["country"],
+        "street": address_data.get("street"),
+        "apartment": address_data.get("apartment")
+    }
+    
+    order.address = new_address
+    db.commit()
+    
+    return {
+        "success": True,
+        "message": "Address updated successfully",
+        "order_id": str(order.id)
+    }
