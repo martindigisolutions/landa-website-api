@@ -264,6 +264,9 @@ class ProductCreate(BaseModel):
     brand: Optional[str] = None
     variant_groups: List[ProductVariantGroupCreate] = []  # Include variant groups on creation
     categories: List[CategoryInput] = []  # Categories for the product
+    # Related products (arrays of seller_sku strings)
+    similar_products: List[str] = []  # Array of seller_sku
+    frequently_bought_together: List[str] = []  # Array of seller_sku
 
 
 class ProductBulkCreate(BaseModel):
@@ -307,6 +310,9 @@ class ProductUpdate(BaseModel):
     variant_groups: Optional[List[ProductVariantGroupCreate]] = None
     # Categories (if provided, replaces all existing categories)
     categories: Optional[List[CategoryInput]] = None
+    # Related products (arrays of seller_sku strings)
+    similar_products: Optional[List[str]] = None
+    frequently_bought_together: Optional[List[str]] = None
 
 
 class ProductAdminResponse(BaseModel):
@@ -345,6 +351,9 @@ class ProductAdminResponse(BaseModel):
     variant_types: List[VariantTypeResponse] = []  # Grouped by variant_type
     # Categories
     categories: List[CategoryResponse] = []
+    # Related products (raw arrays of seller_sku)
+    similar_products: List[str] = []
+    frequently_bought_together: List[str] = []
 
     class Config:
         from_attributes = True
@@ -401,6 +410,9 @@ class ProductBulkUpdateItem(BaseModel):
     variant_groups: Optional[List[ProductVariantGroupCreate]] = None
     # Categories (if provided, replaces all existing categories for this product)
     categories: Optional[List[CategoryInput]] = None
+    # Related products
+    similar_products: Optional[List[str]] = None
+    frequently_bought_together: Optional[List[str]] = None
 
 
 class ProductBulkUpdate(BaseModel):

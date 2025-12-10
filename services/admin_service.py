@@ -676,7 +676,10 @@ def _product_to_response(product: Product) -> ProductAdminResponse:
         created_at=product.created_at,
         updated_at=product.updated_at,
         variant_types=variant_types,
-        categories=categories_response
+        categories=categories_response,
+        # Related products
+        similar_products=product.similar_products or [],
+        frequently_bought_together=product.frequently_bought_together or []
     )
 
 

@@ -66,6 +66,21 @@ class VariantTypePublic(BaseModel):
     variants: Optional[List[ProductVariantPublic]] = None  # Only when categories is null
 
 
+class RelatedProductPublic(BaseModel):
+    """Simplified product info for related products lists"""
+    id: int
+    seller_sku: Optional[str] = None
+    name: str
+    regular_price: Optional[float] = None
+    sale_price: Optional[float] = None
+    image_url: Optional[str] = None
+    is_in_stock: Optional[bool] = None
+    brand: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
 class ProductPublic(BaseModel):
     """
     Localized product response for public frontend.
@@ -91,6 +106,9 @@ class ProductPublic(BaseModel):
     has_variants: Optional[bool] = None
     brand: Optional[str] = None
     variant_types: List[VariantTypePublic] = []  # Grouped by variant_type
+    # Related products (resolved to actual product data, only existing & in-stock)
+    similar_products: List[RelatedProductPublic] = []
+    frequently_bought_together: List[RelatedProductPublic] = []
 
     class Config:
         from_attributes = True

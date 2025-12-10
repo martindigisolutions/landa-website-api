@@ -14,9 +14,51 @@ from schemas.product import (
     VariantCategoryPublic,
     PaginatedProductResponse,
     CategoryGroupPublic,
-    CategoryPublic
+    CategoryPublic,
+    RelatedProductPublic
 )
 from utils.language import localize_field, localize_gallery
+
+
+def _resolve_related_products(
+    skus: list, 
+    db: Session, 
+    lang: str = "es"
+) -> List[RelatedProductPublic]:
+    """
+    Resolve a list of seller_sku to actual product data.
+    Only returns products that exist and are in stock.
+    Maintains the original order.
+    """
+    if not skus:
+        return []
+    
+    # Get all products that match the SKUs and are in stock
+    products = db.query(Product).filter(
+        Product.seller_sku.in_(skus),
+        Product.is_in_stock == True
+    ).all()
+    
+    # Create a lookup dict by seller_sku
+    products_by_sku = {p.seller_sku: p for p in products}
+    
+    # Return in original order, skipping non-existent SKUs
+    result = []
+    for sku in skus:
+        if sku in products_by_sku:
+            p = products_by_sku[sku]
+            result.append(RelatedProductPublic(
+                id=p.id,
+                seller_sku=p.seller_sku,
+                name=localize_field(p.name, p.name_en, lang),
+                regular_price=p.regular_price,
+                sale_price=p.sale_price,
+                image_url=p.image_url,
+                is_in_stock=p.is_in_stock,
+                brand=p.brand
+            ))
+    
+    return result
 
 
 def get_categories(db: Session, lang: str = "es") -> List[CategoryGroupPublic]:
@@ -54,7 +96,7 @@ def get_categories(db: Session, lang: str = "es") -> List[CategoryGroupPublic]:
     return result
 
 
-def _product_to_public(product: Product, lang: str = "es") -> ProductPublic:
+def _product_to_public(product: Product, lang: str = "es", db: Session = None) -> ProductPublic:
     """Convert product model to localized public response with grouped variants"""
     variant_types = []
     
@@ -138,6 +180,13 @@ def _product_to_public(product: Product, lang: str = "es") -> ProductPublic:
                         variants=variants
                     ))
     
+    # Resolve related products (only if db is provided)
+    similar = []
+    frequently_bought = []
+    if db:
+        similar = _resolve_related_products(product.similar_products or [], db, lang)
+        frequently_bought = _resolve_related_products(product.frequently_bought_together or [], db, lang)
+    
     return ProductPublic(
         id=product.id,
         seller_sku=product.seller_sku,
@@ -157,7 +206,9 @@ def _product_to_public(product: Product, lang: str = "es") -> ProductPublic:
         currency=product.currency,
         has_variants=product.has_variants,
         brand=product.brand,
-        variant_types=variant_types
+        variant_types=variant_types,
+        similar_products=similar,
+        frequently_bought_together=frequently_bought
     )
 
 
@@ -240,19 +291,19 @@ def get_products(
 
 
 def get_product_by_id(db: Session, product_id: int, lang: str = "es") -> ProductPublic:
-    """Get a single product by ID with localization"""
+    """Get a single product by ID with localization and resolved related products"""
     product = db.query(Product).filter(Product.id == product_id).first()
     if not product:
         raise HTTPException(status_code=404, detail="Product not found")
-    return _product_to_public(product, lang)
+    return _product_to_public(product, lang, db)  # Pass db to resolve related products
 
 
 def get_product_by_sku(db: Session, seller_sku: str, lang: str = "es") -> ProductPublic:
-    """Get a single product by seller SKU with localization"""
+    """Get a single product by seller SKU with localization and resolved related products"""
     product = db.query(Product).filter(Product.seller_sku == seller_sku).first()
     if not product:
         raise HTTPException(status_code=404, detail="Product not found")
-    return _product_to_public(product, lang)
+    return _product_to_public(product, lang, db)  # Pass db to resolve related products
 
 
 def get_brands(db: Session) -> List[str]:

@@ -74,6 +74,10 @@ class Product(Base):
     has_variants = Column(Boolean, default=False)
     brand = Column(String, nullable=True)
     
+    # Related products (stored as arrays of seller_sku strings)
+    similar_products = Column(JSON, default=list)  # Array of seller_sku
+    frequently_bought_together = Column(JSON, default=list)  # Array of seller_sku
+    
     # Timestamps
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
