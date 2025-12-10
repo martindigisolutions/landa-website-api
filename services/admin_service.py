@@ -1279,11 +1279,16 @@ def validate_single_access_token(token: str, db: Session) -> dict:
         }
     
     # Check expiration first (applies to both used and unused tokens)
+    # Return redirect_url so frontend can redirect, but don't expose user data
     if datetime.utcnow() > token_obj.expires_at:
         return {
-            "valid": False,
-            "already_used": False,
-            "message": "Token has expired"
+            "valid": True,
+            "already_used": True,
+            "access_token": None,
+            "token_type": "bearer",
+            "redirect_url": token_obj.redirect_url or WHOLESALE_FRONTEND_URL,
+            "user": None,
+            "message": "Token has expired. Please request a new access link."
         }
     
     # Get user
@@ -1311,16 +1316,17 @@ def validate_single_access_token(token: str, db: Session) -> dict:
         }
     
     # If token already used, return success but with already_used=True
-    # No new JWT is generated, frontend should check if user is already logged in
+    # No new JWT is generated, frontend should redirect if user is logged in
+    # Don't return user data for security - anyone with the link could see it
     if token_obj.used:
         return {
             "valid": True,
             "already_used": True,
             "access_token": None,
             "token_type": "bearer",
-            "redirect_url": token_obj.redirect_url,
-            "user": UserAdminResponse.model_validate(user),
-            "message": "Token was already used. Redirect if user is logged in."
+            "redirect_url": token_obj.redirect_url or WHOLESALE_FRONTEND_URL,
+            "user": None,
+            "message": "Token validated successfully. User already authenticated."
         }
     
     # First time use - mark as used
