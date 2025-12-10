@@ -80,6 +80,8 @@ class Product(Base):
     
     # Relationship to variant groups
     variant_groups = relationship("ProductVariantGroup", back_populates="product", cascade="all, delete-orphan")
+    # Relationship to categories (many-to-many)
+    product_categories = relationship("ProductCategory", back_populates="product", cascade="all, delete-orphan")
 
 
 class ProductVariantGroup(Base):
@@ -198,3 +200,54 @@ class SingleAccessToken(Base):
     used_at = Column(DateTime, nullable=True)
 
     user = relationship("User", back_populates="single_access_tokens")
+
+
+# ==================== CATEGORY MODELS ====================
+
+class CategoryGroup(Base):
+    """Group/parent of categories (e.g., 'Tipo de producto', 'Marca')"""
+    __tablename__ = "category_groups"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, nullable=False)  # Spanish name
+    name_en = Column(String, nullable=True)  # English name
+    slug = Column(String, unique=True, index=True, nullable=False)
+    icon = Column(String, nullable=True)  # Icon name (e.g., "package", "tag")
+    show_in_filters = Column(Boolean, default=True)  # Show in frontend filters
+    display_order = Column(Integer, default=0)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    # Relationship to categories
+    categories = relationship("Category", back_populates="group", cascade="all, delete-orphan")
+
+
+class Category(Base):
+    """Individual category within a group (e.g., 'Tintes', 'Shampoos')"""
+    __tablename__ = "categories"
+
+    id = Column(Integer, primary_key=True, index=True)
+    group_id = Column(Integer, ForeignKey("category_groups.id"), nullable=False)
+    name = Column(String, nullable=False)  # Spanish name
+    name_en = Column(String, nullable=True)  # English name
+    slug = Column(String, unique=True, index=True, nullable=False)
+    color = Column(String, nullable=True)  # Hex color (e.g., "#007bff")
+    icon = Column(String, nullable=True)  # Optional category-specific icon
+    display_order = Column(Integer, default=0)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    # Relationships
+    group = relationship("CategoryGroup", back_populates="categories")
+    products = relationship("ProductCategory", back_populates="category")
+
+
+class ProductCategory(Base):
+    """Many-to-many relationship between Product and Category"""
+    __tablename__ = "product_categories"
+
+    id = Column(Integer, primary_key=True, index=True)
+    product_id = Column(Integer, ForeignKey("products.id", ondelete="CASCADE"), nullable=False)
+    category_id = Column(Integer, ForeignKey("categories.id", ondelete="CASCADE"), nullable=False)
+
+    # Relationships
+    product = relationship("Product", back_populates="product_categories")
+    category = relationship("Category", back_populates="products")

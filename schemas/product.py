@@ -3,6 +3,35 @@ from typing import Optional, List
 from datetime import datetime
 
 
+# ---------- Category Schemas (Public) ----------
+
+class CategoryPublic(BaseModel):
+    """Category for public frontend (localized)"""
+    id: int
+    name: str  # Localized
+    slug: str
+    color: Optional[str] = None
+    icon: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
+class CategoryGroupPublic(BaseModel):
+    """Category group for public frontend (localized)"""
+    id: int
+    name: str  # Localized
+    slug: str
+    icon: Optional[str] = None
+    show_in_filters: bool = True
+    categories: List[CategoryPublic] = []
+
+    class Config:
+        from_attributes = True
+
+
+# ---------- Product Variant Schemas ----------
+
 class ProductVariantPublic(BaseModel):
     """Localized variant for public frontend"""
     id: int

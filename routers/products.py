@@ -2,13 +2,34 @@ from fastapi import APIRouter, Depends, Query, Header
 from sqlalchemy.orm import Session
 from typing import Optional, List
 
-from schemas.product import ProductPublic, PaginatedProductResponse
+from schemas.product import ProductPublic, PaginatedProductResponse, CategoryGroupPublic
 from models import User
 from database import get_db
 from services import product_service, auth_service
 from utils.language import get_language_from_header
 
 router = APIRouter()
+
+
+@router.get(
+    "/categories",
+    summary="List product categories",
+    description="""
+    Returns all category groups with their categories for filtering products.
+    Only returns groups marked as `show_in_filters=true`.
+    
+    **Localization:** Send `Accept-Language: en` header for English, 
+    or `Accept-Language: es` for Spanish (default).
+    """,
+    response_model=List[CategoryGroupPublic]
+)
+def get_categories(
+    current_user: User = Depends(auth_service.get_current_user),
+    db: Session = Depends(get_db),
+    accept_language: Optional[str] = Header(None, alias="Accept-Language")
+):
+    lang = get_language_from_header(accept_language)
+    return product_service.get_categories(db, lang)
 
 
 @router.get(
@@ -19,6 +40,10 @@ router = APIRouter()
     
     **Localization:** Send `Accept-Language: en` header for English, 
     or `Accept-Language: es` for Spanish (default).
+    
+    **Category Filters:**
+    - `category`: Filter by category slug (e.g., "tintes", "shampoos")
+    - `category_group`: Filter by category group slug (e.g., "tipo-de-producto")
     """,
     response_model=PaginatedProductResponse
 )
@@ -31,6 +56,8 @@ def get_products(
     is_in_stock: Optional[bool] = Query(None, description="Filter by availability"),
     min_price: Optional[float] = Query(None, description="Minimum price filter"),
     max_price: Optional[float] = Query(None, description="Maximum price filter"),
+    category: Optional[str] = Query(None, description="Filter by category slug"),
+    category_group: Optional[str] = Query(None, description="Filter by category group slug"),
     sort_by: Optional[str] = Query("name", description="Sort by: name, price_asc, price_desc, newest"),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100)
@@ -44,6 +71,8 @@ def get_products(
         is_in_stock=is_in_stock,
         min_price=min_price,
         max_price=max_price,
+        category=category,
+        category_group=category_group,
         page=page,
         page_size=page_size,
         sort_by=sort_by

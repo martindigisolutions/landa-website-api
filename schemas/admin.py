@@ -3,6 +3,77 @@ from typing import Optional, List
 from datetime import datetime, date
 
 
+# ---------- Category Schemas ----------
+
+class CategoryInput(BaseModel):
+    """Input schema for category when creating/updating products.
+    Flattened structure that includes both group and category info."""
+    # Group fields
+    group: str  # Spanish name (required)
+    group_en: Optional[str] = None  # English name
+    group_slug: str  # URL-friendly slug (required)
+    group_icon: Optional[str] = None  # Icon name (e.g., "package")
+    group_show_in_filters: bool = True  # Show in frontend filters
+    group_display_order: int = 0  # Display order for the group
+    # Category fields
+    name: str  # Spanish name (required)
+    name_en: Optional[str] = None  # English name
+    slug: str  # URL-friendly slug (required)
+    color: Optional[str] = None  # Hex color (e.g., "#007bff")
+    icon: Optional[str] = None  # Category-specific icon
+    display_order: int = 0  # Display order for the category
+
+
+class CategoryResponse(BaseModel):
+    """Response schema for a single category"""
+    id: int
+    name: str
+    name_en: Optional[str] = None
+    slug: str
+    color: Optional[str] = None
+    icon: Optional[str] = None
+    display_order: int = 0
+    # Include group info
+    group_id: int
+    group_name: str
+    group_name_en: Optional[str] = None
+    group_slug: str
+    group_icon: Optional[str] = None
+    group_show_in_filters: bool = True
+
+    class Config:
+        from_attributes = True
+
+
+class CategoryGroupResponse(BaseModel):
+    """Response schema for a category group with its categories"""
+    id: int
+    name: str
+    name_en: Optional[str] = None
+    slug: str
+    icon: Optional[str] = None
+    show_in_filters: bool = True
+    display_order: int = 0
+    categories: List["CategoryItemResponse"] = []
+
+    class Config:
+        from_attributes = True
+
+
+class CategoryItemResponse(BaseModel):
+    """Response schema for a category within a group"""
+    id: int
+    name: str
+    name_en: Optional[str] = None
+    slug: str
+    color: Optional[str] = None
+    icon: Optional[str] = None
+    display_order: int = 0
+
+    class Config:
+        from_attributes = True
+
+
 # ---------- Application Schemas ----------
 
 class ApplicationCreate(BaseModel):
@@ -192,6 +263,7 @@ class ProductCreate(BaseModel):
     has_variants: bool = False
     brand: Optional[str] = None
     variant_groups: List[ProductVariantGroupCreate] = []  # Include variant groups on creation
+    categories: List[CategoryInput] = []  # Categories for the product
 
 
 class ProductBulkCreate(BaseModel):
@@ -233,6 +305,8 @@ class ProductUpdate(BaseModel):
     brand: Optional[str] = None
     # Variants (if provided, replaces all existing variants)
     variant_groups: Optional[List[ProductVariantGroupCreate]] = None
+    # Categories (if provided, replaces all existing categories)
+    categories: Optional[List[CategoryInput]] = None
 
 
 class ProductAdminResponse(BaseModel):
@@ -269,6 +343,8 @@ class ProductAdminResponse(BaseModel):
     updated_at: Optional[datetime] = None
     # Variants grouped by type (new structure)
     variant_types: List[VariantTypeResponse] = []  # Grouped by variant_type
+    # Categories
+    categories: List[CategoryResponse] = []
 
     class Config:
         from_attributes = True
@@ -323,6 +399,8 @@ class ProductBulkUpdateItem(BaseModel):
     brand: Optional[str] = None
     # Variants (if provided, replaces all existing variants for this product)
     variant_groups: Optional[List[ProductVariantGroupCreate]] = None
+    # Categories (if provided, replaces all existing categories for this product)
+    categories: Optional[List[CategoryInput]] = None
 
 
 class ProductBulkUpdate(BaseModel):

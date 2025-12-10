@@ -6,15 +6,52 @@ from sqlalchemy.orm import Session
 from sqlalchemy import or_
 from fastapi import HTTPException
 
-from models import Product
+from models import Product, CategoryGroup, Category, ProductCategory
 from schemas.product import (
     ProductPublic, 
     ProductVariantPublic, 
     VariantTypePublic,
     VariantCategoryPublic,
-    PaginatedProductResponse
+    PaginatedProductResponse,
+    CategoryGroupPublic,
+    CategoryPublic
 )
 from utils.language import localize_field, localize_gallery
+
+
+def get_categories(db: Session, lang: str = "es") -> List[CategoryGroupPublic]:
+    """Get all category groups with their categories (localized)"""
+    groups = db.query(CategoryGroup).order_by(CategoryGroup.display_order, CategoryGroup.name).all()
+    
+    result = []
+    for group in groups:
+        # Only include groups that should show in filters
+        if not group.show_in_filters:
+            continue
+            
+        categories = [
+            CategoryPublic(
+                id=cat.id,
+                name=localize_field(cat.name, cat.name_en, lang),
+                slug=cat.slug,
+                color=cat.color,
+                icon=cat.icon
+            )
+            for cat in sorted(group.categories, key=lambda c: (c.display_order, c.name))
+        ]
+        
+        # Only include groups with categories
+        if categories:
+            result.append(CategoryGroupPublic(
+                id=group.id,
+                name=localize_field(group.name, group.name_en, lang),
+                slug=group.slug,
+                icon=group.icon,
+                show_in_filters=group.show_in_filters,
+                categories=categories
+            ))
+    
+    return result
 
 
 def _product_to_public(product: Product, lang: str = "es") -> ProductPublic:
@@ -132,6 +169,8 @@ def get_products(
     is_in_stock: Optional[bool] = None,
     min_price: Optional[float] = None,
     max_price: Optional[float] = None,
+    category: Optional[str] = None,
+    category_group: Optional[str] = None,
     page: int = 1,
     page_size: int = 20,
     sort_by: str = "name"
@@ -163,6 +202,14 @@ def get_products(
     
     if max_price is not None:
         query = query.filter(Product.regular_price <= max_price)
+    
+    # Filter by category slug
+    if category:
+        query = query.join(ProductCategory).join(Category).filter(Category.slug == category)
+    
+    # Filter by category group slug
+    if category_group:
+        query = query.join(ProductCategory).join(Category).join(CategoryGroup).filter(CategoryGroup.slug == category_group)
     
     # Get total count
     total_items = query.count()

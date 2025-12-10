@@ -9,7 +9,11 @@ from sqlalchemy import func
 from jose import jwt, JWTError
 
 from database import get_db
-from models import Application, Product, ProductVariantGroup, ProductVariant, Order, OrderItem, User, SingleAccessToken
+from models import (
+    Application, Product, ProductVariantGroup, ProductVariant, 
+    Order, OrderItem, User, SingleAccessToken,
+    CategoryGroup, Category, ProductCategory
+)
 from schemas.admin import (
     ApplicationCreate, ApplicationUpdate, ApplicationResponse, ApplicationCreatedResponse,
     ProductCreate, ProductUpdate, ProductAdminResponse,
@@ -24,7 +28,8 @@ from schemas.admin import (
     AdminStats,
     UserAdminCreate, UserAdminResponse, UserAdminCreatedResponse, PaginatedUsersResponse,
     SingleAccessTokenCreate, SingleAccessTokenResponse,
-    UserSuspendRequest, UserBlockRequest, UserActionResponse
+    UserSuspendRequest, UserBlockRequest, UserActionResponse,
+    CategoryInput, CategoryResponse, CategoryGroupResponse, CategoryItemResponse
 )
 from config import SECRET_KEY, ALGORITHM, WHOLESALE_FRONTEND_URL, SINGLE_ACCESS_TOKEN_EXPIRE_HOURS
 
@@ -306,13 +311,118 @@ def authenticate_application(client_id: str, client_secret: str, db: Session) ->
     return app
 
 
+# ---------- Category Management ----------
+
+def _process_categories(product_id: int, categories_data: List[CategoryInput], db: Session) -> None:
+    """Process categories input and create/link categories to product.
+    Creates category groups and categories if they don't exist (by slug).
+    """
+    for cat_input in categories_data:
+        # Find or create CategoryGroup
+        group = db.query(CategoryGroup).filter(CategoryGroup.slug == cat_input.group_slug).first()
+        if not group:
+            group = CategoryGroup(
+                name=cat_input.group,
+                name_en=cat_input.group_en,
+                slug=cat_input.group_slug,
+                icon=cat_input.group_icon,
+                show_in_filters=cat_input.group_show_in_filters,
+                display_order=cat_input.group_display_order
+            )
+            db.add(group)
+            db.flush()
+        else:
+            # Update group info if provided (in case it changed)
+            group.name = cat_input.group
+            if cat_input.group_en:
+                group.name_en = cat_input.group_en
+            if cat_input.group_icon:
+                group.icon = cat_input.group_icon
+            group.show_in_filters = cat_input.group_show_in_filters
+            group.display_order = cat_input.group_display_order
+        
+        # Find or create Category
+        category = db.query(Category).filter(Category.slug == cat_input.slug).first()
+        if not category:
+            category = Category(
+                group_id=group.id,
+                name=cat_input.name,
+                name_en=cat_input.name_en,
+                slug=cat_input.slug,
+                color=cat_input.color,
+                icon=cat_input.icon,
+                display_order=cat_input.display_order
+            )
+            db.add(category)
+            db.flush()
+        else:
+            # Update category info if provided (in case it changed)
+            category.name = cat_input.name
+            if cat_input.name_en:
+                category.name_en = cat_input.name_en
+            if cat_input.color:
+                category.color = cat_input.color
+            if cat_input.icon:
+                category.icon = cat_input.icon
+            category.display_order = cat_input.display_order
+            # Update group_id in case it moved to a different group
+            category.group_id = group.id
+        
+        # Link product to category (if not already linked)
+        existing_link = db.query(ProductCategory).filter(
+            ProductCategory.product_id == product_id,
+            ProductCategory.category_id == category.id
+        ).first()
+        
+        if not existing_link:
+            product_category = ProductCategory(
+                product_id=product_id,
+                category_id=category.id
+            )
+            db.add(product_category)
+
+
+def list_categories(db: Session) -> List[CategoryGroupResponse]:
+    """List all category groups with their categories"""
+    groups = db.query(CategoryGroup).order_by(CategoryGroup.display_order, CategoryGroup.name).all()
+    
+    result = []
+    for group in groups:
+        categories = [
+            CategoryItemResponse(
+                id=cat.id,
+                name=cat.name,
+                name_en=cat.name_en,
+                slug=cat.slug,
+                color=cat.color,
+                icon=cat.icon,
+                display_order=cat.display_order
+            )
+            for cat in sorted(group.categories, key=lambda c: (c.display_order, c.name))
+        ]
+        
+        result.append(CategoryGroupResponse(
+            id=group.id,
+            name=group.name,
+            name_en=group.name_en,
+            slug=group.slug,
+            icon=group.icon,
+            show_in_filters=group.show_in_filters,
+            display_order=group.display_order,
+            categories=categories
+        ))
+    
+    return result
+
+
 # ---------- Product Management ----------
 
 def create_product(data: ProductCreate, db: Session) -> ProductAdminResponse:
-    """Create a new product with optional variant groups"""
-    # Extract variant groups before creating product
+    """Create a new product with optional variant groups and categories"""
+    # Extract variant groups and categories before creating product
     variant_groups_data = data.variant_groups
-    product_data = data.model_dump(exclude={'variant_groups'})
+    categories_data = data.categories
+    product_data = data.model_dump(exclude={'variant_groups', 'categories'})
     
     # If variant groups provided, set has_variants to True
     if variant_groups_data:
@@ -349,6 +459,12 @@ def create_product(data: ProductCreate, db: Session) -> ProductAdminResponse:
                 )
                 db.add(variant)
         
+        db.commit()
+        db.refresh(product)
+    
+    # Process categories if provided
+    if categories_data:
+        _process_categories(product.id, categories_data, db)
         db.commit()
         db.refresh(product)
     
@@ -389,14 +505,16 @@ def bulk_create_products(data: ProductBulkCreate, db: Session) -> ProductBulkRes
 
 
 def update_product(product_id: int, data: ProductUpdate, db: Session) -> ProductAdminResponse:
-    """Update an existing product. If variant_groups is provided, replaces all variants."""
+    """Update an existing product. If variant_groups is provided, replaces all variants.
+    If categories is provided, replaces all categories."""
     product = db.query(Product).filter(Product.id == product_id).first()
     if not product:
         raise HTTPException(status_code=404, detail="Product not found")
     
-    # Extract variant_groups before processing other fields
+    # Extract variant_groups and categories before processing other fields
     variant_groups_data = data.variant_groups
-    update_data = data.model_dump(exclude_unset=True, exclude={'variant_groups'})
+    categories_data = data.categories
+    update_data = data.model_dump(exclude_unset=True, exclude={'variant_groups', 'categories'})
     
     # Update simple fields
     for field, value in update_data.items():
@@ -437,6 +555,16 @@ def update_product(product_id: int, data: ProductUpdate, db: Session) -> Product
         else:
             # Empty array = remove all variants
             product.has_variants = False
+    
+    # Handle categories if provided (replace all)
+    if categories_data is not None:
+        # Delete existing product-category links
+        db.query(ProductCategory).filter(ProductCategory.product_id == product.id).delete()
+        db.flush()
+        
+        # Process new categories
+        if categories_data:
+            _process_categories(product.id, categories_data, db)
     
     # Force updated_at to update
     product.updated_at = datetime.utcnow()
@@ -494,6 +622,28 @@ def _product_to_response(product: Product) -> ProductAdminResponse:
                     variants=variants
                 ))
     
+    # Build categories response
+    categories_response = []
+    if product.product_categories:
+        for pc in product.product_categories:
+            cat = pc.category
+            group = cat.group
+            categories_response.append(CategoryResponse(
+                id=cat.id,
+                name=cat.name,
+                name_en=cat.name_en,
+                slug=cat.slug,
+                color=cat.color,
+                icon=cat.icon,
+                display_order=cat.display_order,
+                group_id=group.id,
+                group_name=group.name,
+                group_name_en=group.name_en,
+                group_slug=group.slug,
+                group_icon=group.icon,
+                group_show_in_filters=group.show_in_filters
+            ))
+    
     return ProductAdminResponse(
         id=product.id,
         seller_sku=product.seller_sku,
@@ -525,7 +675,8 @@ def _product_to_response(product: Product) -> ProductAdminResponse:
         # Timestamps
         created_at=product.created_at,
         updated_at=product.updated_at,
-        variant_types=variant_types
+        variant_types=variant_types,
+        categories=categories_response
     )
 
 
@@ -607,7 +758,7 @@ def bulk_delete_products(data: ProductBulkDelete, db: Session) -> ProductBulkDel
 
 
 def bulk_update_products(data: ProductBulkUpdate, db: Session) -> ProductBulkUpdateResponse:
-    """Update multiple products at once (for inventory, prices, variants, etc.)"""
+    """Update multiple products at once (for inventory, prices, variants, categories, etc.)"""
     updated_products = []
     errors = []
     
@@ -622,9 +773,10 @@ def bulk_update_products(data: ProductBulkUpdate, db: Session) -> ProductBulkUpd
             continue
         
         try:
-            # Extract variant_groups before processing other fields
+            # Extract variant_groups and categories before processing other fields
             variant_groups_data = item.variant_groups
-            update_data = item.model_dump(exclude={'id', 'variant_groups'}, exclude_unset=True)
+            categories_data = item.categories
+            update_data = item.model_dump(exclude={'id', 'variant_groups', 'categories'}, exclude_unset=True)
             
             # Update simple fields
             for field, value in update_data.items():
@@ -666,6 +818,16 @@ def bulk_update_products(data: ProductBulkUpdate, db: Session) -> ProductBulkUpd
                 else:
                     # Empty array = remove all variants
                     product.has_variants = False
+            
+            # Handle categories if provided (replace all)
+            if categories_data is not None:
+                # Delete existing product-category links
+                db.query(ProductCategory).filter(ProductCategory.product_id == product.id).delete()
+                db.flush()
+                
+                # Process new categories
+                if categories_data:
+                    _process_categories(product.id, categories_data, db)
             
             # Force updated_at to update
             product.updated_at = datetime.utcnow()

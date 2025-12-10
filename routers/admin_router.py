@@ -17,7 +17,8 @@ from schemas.admin import (
     AdminStats,
     UserAdminCreate, UserAdminResponse, UserAdminCreatedResponse, PaginatedUsersResponse,
     SingleAccessTokenCreate, SingleAccessTokenResponse,
-    UserSuspendRequest, UserBlockRequest, UserActionResponse
+    UserSuspendRequest, UserBlockRequest, UserActionResponse,
+    CategoryGroupResponse
 )
 from schemas.product import ProductSchema
 
@@ -224,6 +225,22 @@ def delete_product(
     db: Session = Depends(get_db)
 ):
     return admin_service.delete_product(product_id, db)
+
+
+# ==================== CATEGORY MANAGEMENT ====================
+# These endpoints require products:read scope
+
+@router.get(
+    "/categories",
+    response_model=List[CategoryGroupResponse],
+    summary="List all categories",
+    description="Get all category groups with their categories. Categories are grouped by their parent group."
+)
+def list_categories(
+    app=Depends(admin_service.require_scope("products:read")),
+    db: Session = Depends(get_db)
+):
+    return admin_service.list_categories(db)
 
 
 # ==================== VARIANT MANAGEMENT ====================
