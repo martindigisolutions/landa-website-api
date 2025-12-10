@@ -5,6 +5,7 @@ from datetime import datetime
 class ProductInCart(BaseModel):
     product_id: int
     quantity: int
+    variant_id: Optional[int] = None  # For products with variants
 
 class CheckoutSessionCreate(BaseModel):
     session_id: str

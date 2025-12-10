@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Boolean, Float, Date, DateTime, ForeignKey, func
+from sqlalchemy import Column, Integer, String, Boolean, Float, Date, DateTime, ForeignKey, JSON, func
 from sqlalchemy.orm import relationship
 from datetime import datetime
 from database import Base
@@ -37,21 +37,84 @@ class Product(Base):
     __tablename__ = "products"
 
     id = Column(Integer, primary_key=True, index=True)
-    name = Column(String, nullable=False)
-    short_description = Column(String)
-    description = Column(String)
+    seller_sku = Column(String, unique=True, index=True, nullable=True)  # SKU for dashboard linking
+    
+    # Names (commercial title from dashboard)
+    name = Column(String, nullable=False)  # Spanish (default)
+    name_en = Column(String, nullable=True)  # English
+    
+    # Descriptions
+    short_description = Column(String, nullable=True)  # Spanish
+    short_description_en = Column(String, nullable=True)  # English
+    description = Column(String, nullable=True)  # Spanish
+    description_en = Column(String, nullable=True)  # English
+    
+    # Tags for search
+    tags = Column(String, nullable=True)  # Spanish (semicolon separated)
+    tags_en = Column(String, nullable=True)  # English (semicolon separated)
+    
+    # Pricing
     regular_price = Column(Float)
-    sale_price = Column(Float)
-    stock = Column(Integer)
-    is_in_stock = Column(Boolean)
+    sale_price = Column(Float, nullable=True)
+    
+    # Inventory
+    stock = Column(Integer, default=0)
+    is_in_stock = Column(Boolean, default=True)
     restock_date = Column(Date, nullable=True)
-    is_favorite = Column(Boolean)
-    notify_when_available = Column(Boolean)
-    image_url = Column(String)
-    currency = Column(String)
-    low_stock_threshold = Column(Integer)
+    low_stock_threshold = Column(Integer, default=5)
+    
+    # Display
+    is_favorite = Column(Boolean, default=False)
+    notify_when_available = Column(Boolean, default=False)
+    image_url = Column(String, nullable=True)  # Main image
+    gallery = Column(JSON, default=list)  # Array of additional image URLs
+    currency = Column(String, default="USD")
+    
+    # Classification
     has_variants = Column(Boolean, default=False)
-    brand = Column(String)
+    brand = Column(String, nullable=True)
+    
+    # Timestamps
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # Relationship to variant groups
+    variant_groups = relationship("ProductVariantGroup", back_populates="product", cascade="all, delete-orphan")
+
+
+class ProductVariantGroup(Base):
+    """Group/Category of variants (e.g., 'Naturales', 'Fantasías')"""
+    __tablename__ = "product_variant_groups"
+
+    id = Column(Integer, primary_key=True, index=True)
+    product_id = Column(Integer, ForeignKey("products.id"), nullable=False)
+    variant_type = Column(String, nullable=False)  # e.g., "Color", "Tamaño", "Volumen" - REQUIRED
+    name = Column(String, nullable=True)  # Category name e.g., "Naturales", "Fantasías" - OPTIONAL (null = simple variants)
+    display_order = Column(Integer, default=0)  # For sorting groups
+    
+    product = relationship("Product", back_populates="variant_groups")
+    variants = relationship("ProductVariant", back_populates="group", cascade="all, delete-orphan")
+
+
+class ProductVariant(Base):
+    __tablename__ = "product_variants"
+
+    id = Column(Integer, primary_key=True, index=True)
+    group_id = Column(Integer, ForeignKey("product_variant_groups.id"), nullable=False)
+    seller_sku = Column(String, unique=True, index=True, nullable=True)
+    name = Column(String, nullable=False)  # Display name e.g., "Rubio", "Azul", "Vol 10"
+    variant_value = Column(String, nullable=True)  # Clean value for filters/search e.g., "Rubio", "Vol 10"
+    barcode = Column(String, nullable=True)  # Barcode/UPC for scanning
+    attributes = Column(JSON, default=dict)  # Additional attributes if needed
+    regular_price = Column(Float, nullable=True)  # Override parent price if set
+    sale_price = Column(Float, nullable=True)
+    stock = Column(Integer, default=0)
+    is_in_stock = Column(Boolean, default=True)
+    image_url = Column(String, nullable=True)  # Variant-specific image
+    display_order = Column(Integer, default=0)  # For sorting variants
+    active = Column(Boolean, default=True)  # Soft delete without removing
+    
+    group = relationship("ProductVariantGroup", back_populates="variants")
 
 class PasswordResetRequest(Base):
     __tablename__ = "password_reset_requests"
@@ -96,11 +159,14 @@ class OrderItem(Base):
     id = Column(Integer, primary_key=True, index=True)
     order_id = Column(Integer, ForeignKey("orders.id"))
     product_id = Column(Integer, ForeignKey("products.id"))
+    variant_id = Column(Integer, ForeignKey("product_variants.id"), nullable=True)  # For products with variants
     quantity = Column(Integer)
     price = Column(Float)  # Precio congelado en el momento de la compra
+    variant_name = Column(String, nullable=True)  # Frozen variant name at purchase time
 
     order = relationship("Order", back_populates="items")
     product = relationship("Product")
+    variant = relationship("ProductVariant")
 
 
 class Application(Base):

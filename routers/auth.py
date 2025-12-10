@@ -71,7 +71,7 @@ def get_user_by_id(
     summary="Validate single-access token",
     description="""Validate a single-use access token received via a shared link.
     If valid, returns a JWT access token and the redirect URL.
-    The token can only be used once and expires after 24 hours."""
+    If already_used=true, no new token is provided - frontend should redirect if user is logged in."""
 )
 def validate_access_token(
     data: ValidateAccessTokenRequest,

@@ -7,6 +7,12 @@ from services import admin_service
 from schemas.admin import (
     ApplicationCreate, ApplicationUpdate, ApplicationResponse, ApplicationCreatedResponse,
     ProductCreate, ProductUpdate, ProductAdminResponse,
+    ProductBulkCreate, ProductBulkResponse,
+    ProductBulkDelete, ProductBulkDeleteResponse,
+    ProductBulkUpdate, ProductBulkUpdateResponse,
+    ProductVariantCreate, ProductVariantUpdate, ProductVariantResponse,
+    ProductVariantGroupCreate, ProductVariantGroupResponse,
+    VariantBulkDelete, VariantBulkDeleteResponse,
     OrderAdminResponse, OrderStatusUpdate, PaginatedOrdersResponse,
     AdminStats,
     UserAdminCreate, UserAdminResponse, UserAdminCreatedResponse, PaginatedUsersResponse,
@@ -106,6 +112,36 @@ def rotate_secret(
 # ==================== PRODUCT MANAGEMENT ====================
 # These endpoints require products:read or products:write scope
 
+@router.get(
+    "/products",
+    response_model=List[ProductAdminResponse],
+    summary="List all products",
+    description="Get a list of all products with optional filters."
+)
+def list_products(
+    search: Optional[str] = Query(None, description="Search by name or brand"),
+    brand: Optional[str] = Query(None, description="Filter by brand"),
+    is_in_stock: Optional[bool] = Query(None, description="Filter by stock status"),
+    app=Depends(admin_service.require_scope("products:read")),
+    db: Session = Depends(get_db)
+):
+    return admin_service.list_products(db, search, brand, is_in_stock)
+
+
+@router.get(
+    "/products/{product_id}",
+    response_model=ProductAdminResponse,
+    summary="Get product by ID",
+    description="Get details of a specific product."
+)
+def get_product(
+    product_id: int,
+    app=Depends(admin_service.require_scope("products:read")),
+    db: Session = Depends(get_db)
+):
+    return admin_service.get_product(product_id, db)
+
+
 @router.post(
     "/products",
     response_model=ProductAdminResponse,
@@ -118,6 +154,48 @@ def create_product(
     db: Session = Depends(get_db)
 ):
     return admin_service.create_product(data, db)
+
+
+@router.post(
+    "/products/bulk",
+    response_model=ProductBulkResponse,
+    summary="Create multiple products",
+    description="Create multiple products at once. Returns created products and any errors."
+)
+def bulk_create_products(
+    data: ProductBulkCreate,
+    app=Depends(admin_service.require_scope("products:write")),
+    db: Session = Depends(get_db)
+):
+    return admin_service.bulk_create_products(data, db)
+
+
+@router.put(
+    "/products/bulk",
+    response_model=ProductBulkUpdateResponse,
+    summary="Update multiple products",
+    description="Update multiple products at once (inventory, prices, etc.). Only provided fields will be updated."
+)
+def bulk_update_products(
+    data: ProductBulkUpdate,
+    app=Depends(admin_service.require_scope("products:write")),
+    db: Session = Depends(get_db)
+):
+    return admin_service.bulk_update_products(data, db)
+
+
+@router.delete(
+    "/products/bulk",
+    response_model=ProductBulkDeleteResponse,
+    summary="Delete multiple products",
+    description="Delete multiple products at once by their IDs."
+)
+def bulk_delete_products(
+    data: ProductBulkDelete,
+    app=Depends(admin_service.require_scope("products:write")),
+    db: Session = Depends(get_db)
+):
+    return admin_service.bulk_delete_products(data, db)
 
 
 @router.put(
@@ -146,6 +224,94 @@ def delete_product(
     db: Session = Depends(get_db)
 ):
     return admin_service.delete_product(product_id, db)
+
+
+# ==================== VARIANT MANAGEMENT ====================
+# These endpoints manage individual variants without replacing all variants
+
+@router.post(
+    "/products/{product_id}/variant-groups",
+    response_model=ProductVariantGroupResponse,
+    summary="Add variant group to product",
+    description="Add a new variant group with variants to an existing product."
+)
+def add_variant_group(
+    product_id: int,
+    data: ProductVariantGroupCreate,
+    app=Depends(admin_service.require_scope("products:write")),
+    db: Session = Depends(get_db)
+):
+    return admin_service.add_variant_group(product_id, data, db)
+
+
+@router.post(
+    "/variant-groups/{group_id}/variants",
+    response_model=ProductVariantResponse,
+    summary="Add variant to group",
+    description="Add a single variant to an existing variant group."
+)
+def add_variant_to_group(
+    group_id: int,
+    data: ProductVariantCreate,
+    app=Depends(admin_service.require_scope("products:write")),
+    db: Session = Depends(get_db)
+):
+    return admin_service.add_variant_to_group(group_id, data, db)
+
+
+@router.delete(
+    "/variants/bulk",
+    response_model=VariantBulkDeleteResponse,
+    summary="Delete multiple variants",
+    description="Delete multiple variants at once by their IDs."
+)
+def bulk_delete_variants(
+    data: VariantBulkDelete,
+    app=Depends(admin_service.require_scope("products:write")),
+    db: Session = Depends(get_db)
+):
+    return admin_service.bulk_delete_variants(data, db)
+
+
+@router.put(
+    "/variants/{variant_id}",
+    response_model=ProductVariantResponse,
+    summary="Update variant",
+    description="Update a single variant. Only provided fields will be updated."
+)
+def update_variant(
+    variant_id: int,
+    data: ProductVariantUpdate,
+    app=Depends(admin_service.require_scope("products:write")),
+    db: Session = Depends(get_db)
+):
+    return admin_service.update_variant(variant_id, data, db)
+
+
+@router.delete(
+    "/variants/{variant_id}",
+    summary="Delete variant",
+    description="Delete a single variant from a group."
+)
+def delete_variant(
+    variant_id: int,
+    app=Depends(admin_service.require_scope("products:write")),
+    db: Session = Depends(get_db)
+):
+    return admin_service.delete_variant(variant_id, db)
+
+
+@router.delete(
+    "/variant-groups/{group_id}",
+    summary="Delete variant group",
+    description="Delete a variant group and all its variants."
+)
+def delete_variant_group(
+    group_id: int,
+    app=Depends(admin_service.require_scope("products:write")),
+    db: Session = Depends(get_db)
+):
+    return admin_service.delete_variant_group(group_id, db)
 
 
 # ==================== ORDER MANAGEMENT ====================

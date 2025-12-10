@@ -1,6 +1,6 @@
 from sqlalchemy.orm import Session
 from fastapi import HTTPException
-from models import Product, Order, OrderItem
+from models import Product, ProductVariant, Order, OrderItem
 from schemas.checkout import CheckoutSessionCreate, CheckoutOptionsRequest, OrderCreate, ConfirmManualPayment
 from uuid import uuid4
 from typing import Optional
@@ -8,8 +8,39 @@ from typing import Optional
 def start_checkout_session(data: CheckoutSessionCreate, db: Session):
     for item in data.products:
         product = db.query(Product).filter(Product.id == item.product_id).first()
-        if not product or not product.is_in_stock:
-            raise HTTPException(status_code=400, detail=f"Product {item.product_id} not available")
+        if not product:
+            raise HTTPException(status_code=400, detail=f"Product {item.product_id} not found")
+        
+        # If product has variants, variant_id is required
+        if product.has_variants:
+            if not item.variant_id:
+                raise HTTPException(
+                    status_code=400, 
+                    detail=f"Product {item.product_id} requires a variant_id"
+                )
+            # Validate variant belongs to this product
+            variant = db.query(ProductVariant).filter(ProductVariant.id == item.variant_id).first()
+            if not variant:
+                raise HTTPException(
+                    status_code=400, 
+                    detail=f"Variant {item.variant_id} not found"
+                )
+            # Check variant belongs to this product (through group)
+            if variant.group.product_id != product.id:
+                raise HTTPException(
+                    status_code=400, 
+                    detail=f"Variant {item.variant_id} does not belong to product {item.product_id}"
+                )
+            # Check variant stock
+            if not variant.is_in_stock:
+                raise HTTPException(
+                    status_code=400, 
+                    detail=f"Variant {variant.name} is out of stock"
+                )
+        else:
+            # Product without variants
+            if not product.is_in_stock:
+                raise HTTPException(status_code=400, detail=f"Product {item.product_id} is out of stock")
 
     checkout_id = data.session_id or str(uuid4())
 
@@ -66,13 +97,48 @@ def create_order(data: OrderCreate, db: Session):
     if data.payment_method not in valid_methods:
         raise HTTPException(status_code=400, detail="Invalid payment method")
 
+    # Calculate total and validate items
     total = 0.0
+    order_items_data = []
+    
     for item in data.products:
         product = db.query(Product).filter(Product.id == item.product_id).first()
         if not product:
             raise HTTPException(status_code=404, detail=f"Product {item.product_id} not found")
-        price = product.sale_price or product.regular_price
+        
+        variant = None
+        variant_name = None
+        
+        # Handle products with variants
+        if product.has_variants:
+            if not item.variant_id:
+                raise HTTPException(
+                    status_code=400, 
+                    detail=f"Product {item.product_id} requires a variant_id"
+                )
+            variant = db.query(ProductVariant).filter(ProductVariant.id == item.variant_id).first()
+            if not variant:
+                raise HTTPException(status_code=404, detail=f"Variant {item.variant_id} not found")
+            if variant.group.product_id != product.id:
+                raise HTTPException(
+                    status_code=400, 
+                    detail=f"Variant {item.variant_id} does not belong to product {item.product_id}"
+                )
+            # Use variant price if set, otherwise use product price
+            price = variant.sale_price or variant.regular_price or product.sale_price or product.regular_price
+            variant_name = variant.name
+        else:
+            # Product without variants
+            price = product.sale_price or product.regular_price
+        
         total += price * item.quantity
+        order_items_data.append({
+            "product_id": product.id,
+            "variant_id": item.variant_id,
+            "variant_name": variant_name,
+            "quantity": item.quantity,
+            "price": price
+        })
 
     order = Order(
         session_id=data.session_id,
@@ -86,14 +152,15 @@ def create_order(data: OrderCreate, db: Session):
     db.add(order)
     db.flush()
 
-    for item in data.products:
-        product = db.query(Product).filter(Product.id == item.product_id).first()
-        price = product.sale_price or product.regular_price
+    # Create order items
+    for item_data in order_items_data:
         db.add(OrderItem(
             order_id=order.id,
-            product_id=product.id,
-            quantity=item.quantity,
-            price=price
+            product_id=item_data["product_id"],
+            variant_id=item_data["variant_id"],
+            variant_name=item_data["variant_name"],
+            quantity=item_data["quantity"],
+            price=item_data["price"]
         ))
 
     db.commit()

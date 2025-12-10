@@ -54,10 +54,130 @@ class TokenResponse(BaseModel):
 
 # ---------- Product Admin Schemas ----------
 
-class ProductCreate(BaseModel):
+# ---------- Product Variant Schemas ----------
+
+class ProductVariantCreate(BaseModel):
+    seller_sku: Optional[str] = None
+    name: str  # Display name e.g., "Rubio", "Azul", "Vol 10"
+    variant_value: Optional[str] = None  # Clean value for filters (defaults to name if not provided)
+    barcode: Optional[str] = None  # Barcode/UPC for scanning
+    attributes: dict = {}  # Additional attributes if needed
+    regular_price: Optional[float] = None  # Override parent price
+    sale_price: Optional[float] = None
+    stock: int = 0
+    is_in_stock: bool = True
+    image_url: Optional[str] = None
+    display_order: int = 0
+    active: bool = True  # Soft delete without removing
+
+
+class ProductVariantResponse(BaseModel):
+    id: int
+    group_id: int
+    seller_sku: Optional[str] = None
     name: str
-    short_description: Optional[str] = None
-    description: Optional[str] = None
+    variant_value: Optional[str] = None
+    barcode: Optional[str] = None
+    attributes: dict = {}
+    regular_price: Optional[float] = None
+    sale_price: Optional[float] = None
+    stock: Optional[int] = None
+    is_in_stock: Optional[bool] = None
+    image_url: Optional[str] = None
+    display_order: int = 0
+    active: bool = True
+
+    class Config:
+        from_attributes = True
+
+
+class ProductVariantGroupCreate(BaseModel):
+    variant_type: str  # REQUIRED: e.g., "Color", "Tamaño", "Volumen"
+    name: Optional[str] = None  # OPTIONAL: Category name e.g., "Naturales", "Fantasías" (null = simple variants)
+    display_order: int = 0
+    variants: List[ProductVariantCreate] = []
+
+
+class ProductVariantUpdate(BaseModel):
+    seller_sku: Optional[str] = None
+    name: Optional[str] = None
+    variant_value: Optional[str] = None
+    barcode: Optional[str] = None
+    attributes: Optional[dict] = None
+    regular_price: Optional[float] = None
+    sale_price: Optional[float] = None
+    stock: Optional[int] = None
+    is_in_stock: Optional[bool] = None
+    image_url: Optional[str] = None
+    display_order: Optional[int] = None
+    active: Optional[bool] = None
+
+
+class VariantBulkDelete(BaseModel):
+    variant_ids: List[int]
+
+
+class VariantBulkDeleteError(BaseModel):
+    id: int
+    error: str
+
+
+class VariantBulkDeleteResponse(BaseModel):
+    deleted: int
+    failed: int
+    errors: List[VariantBulkDeleteError] = []
+
+
+class ProductVariantGroupResponse(BaseModel):
+    """Used internally and for individual group endpoints"""
+    id: int
+    product_id: int
+    variant_type: str  # e.g., "Color", "Tamaño", "Volumen"
+    name: Optional[str] = None  # Category name (null = simple variants)
+    display_order: int = 0
+    variants: List[ProductVariantResponse] = []
+
+    class Config:
+        from_attributes = True
+
+
+# ---------- Grouped Variant Response (for product detail) ----------
+
+class VariantCategoryResponse(BaseModel):
+    """Category within a variant type (e.g., 'Naturales' within 'Color')"""
+    id: int
+    name: str
+    display_order: int = 0
+    variants: List[ProductVariantResponse] = []
+
+
+class VariantTypeResponse(BaseModel):
+    """
+    Grouped variant type response.
+    - If categories is not None: variants are organized by category
+    - If categories is None: variants are direct (simple variants)
+    """
+    type: str  # e.g., "Color", "Tamaño", "Volumen"
+    categories: Optional[List[VariantCategoryResponse]] = None  # null = simple variants
+    variants: Optional[List[ProductVariantResponse]] = None  # Only when categories is null
+
+
+# ---------- Product Schemas ----------
+
+class ProductCreate(BaseModel):
+    seller_sku: Optional[str] = None  # SKU for dashboard linking
+    # Names (commercial title from dashboard)
+    name: str  # Spanish (required)
+    name_en: Optional[str] = None  # English
+    # Descriptions
+    short_description: Optional[str] = None  # Spanish
+    short_description_en: Optional[str] = None  # English
+    description: Optional[str] = None  # Spanish
+    description_en: Optional[str] = None  # English
+    # Tags
+    tags: Optional[str] = None  # Spanish (semicolon separated)
+    tags_en: Optional[str] = None  # English (semicolon separated)
+    # Pricing & Inventory
     regular_price: float
     sale_price: Optional[float] = None
     stock: Optional[int] = 0
@@ -65,17 +185,39 @@ class ProductCreate(BaseModel):
     restock_date: Optional[date] = None
     is_favorite: bool = False
     notify_when_available: bool = False
-    image_url: Optional[str] = None
+    image_url: Optional[str] = None  # Main image
+    gallery: List[str] = []  # Additional images
     currency: str = "USD"
     low_stock_threshold: int = 5
     has_variants: bool = False
     brand: Optional[str] = None
+    variant_groups: List[ProductVariantGroupCreate] = []  # Include variant groups on creation
+
+
+class ProductBulkCreate(BaseModel):
+    products: List[ProductCreate]
+
+
+class ProductBulkError(BaseModel):
+    index: int
+    seller_sku: Optional[str] = None
+    error: str
 
 
 class ProductUpdate(BaseModel):
+    seller_sku: Optional[str] = None
+    # Names
     name: Optional[str] = None
+    name_en: Optional[str] = None
+    # Descriptions
     short_description: Optional[str] = None
+    short_description_en: Optional[str] = None
     description: Optional[str] = None
+    description_en: Optional[str] = None
+    # Tags
+    tags: Optional[str] = None
+    tags_en: Optional[str] = None
+    # Pricing & Inventory
     regular_price: Optional[float] = None
     sale_price: Optional[float] = None
     stock: Optional[int] = None
@@ -84,32 +226,120 @@ class ProductUpdate(BaseModel):
     is_favorite: Optional[bool] = None
     notify_when_available: Optional[bool] = None
     image_url: Optional[str] = None
+    gallery: Optional[List[str]] = None  # Additional images
     currency: Optional[str] = None
     low_stock_threshold: Optional[int] = None
     has_variants: Optional[bool] = None
     brand: Optional[str] = None
+    # Variants (if provided, replaces all existing variants)
+    variant_groups: Optional[List[ProductVariantGroupCreate]] = None
 
 
 class ProductAdminResponse(BaseModel):
+    """Full product response for admin dashboard (includes all language fields)"""
     id: int
+    seller_sku: Optional[str] = None
+    # Names
     name: str
-    short_description: Optional[str]
-    description: Optional[str]
-    regular_price: float
-    sale_price: Optional[float]
-    stock: Optional[int]
-    is_in_stock: bool
-    restock_date: Optional[date]
-    is_favorite: bool
-    notify_when_available: bool
-    image_url: Optional[str]
-    currency: str
-    low_stock_threshold: int
-    has_variants: bool
-    brand: Optional[str]
+    name_en: Optional[str] = None
+    # Descriptions
+    short_description: Optional[str] = None
+    short_description_en: Optional[str] = None
+    description: Optional[str] = None
+    description_en: Optional[str] = None
+    # Tags
+    tags: Optional[str] = None
+    tags_en: Optional[str] = None
+    # Pricing & Inventory
+    regular_price: Optional[float] = None
+    sale_price: Optional[float] = None
+    stock: Optional[int] = None
+    is_in_stock: Optional[bool] = None
+    restock_date: Optional[date] = None
+    is_favorite: Optional[bool] = None
+    notify_when_available: Optional[bool] = None
+    image_url: Optional[str] = None
+    gallery: List[str] = []  # Additional images
+    currency: Optional[str] = None
+    low_stock_threshold: Optional[int] = None
+    has_variants: Optional[bool] = None
+    brand: Optional[str] = None
+    # Timestamps
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+    # Variants grouped by type (new structure)
+    variant_types: List[VariantTypeResponse] = []  # Grouped by variant_type
 
     class Config:
         from_attributes = True
+
+
+class ProductBulkResponse(BaseModel):
+    created: int
+    failed: int
+    errors: List[ProductBulkError] = []
+    products: List[ProductAdminResponse] = []
+
+
+# Bulk Delete
+class ProductBulkDelete(BaseModel):
+    product_ids: List[int]
+
+
+class ProductBulkDeleteError(BaseModel):
+    id: int
+    error: str
+
+
+class ProductBulkDeleteResponse(BaseModel):
+    deleted: int
+    failed: int
+    errors: List[ProductBulkDeleteError] = []
+
+
+# Bulk Update
+class ProductBulkUpdateItem(BaseModel):
+    id: int  # Product ID to update
+    seller_sku: Optional[str] = None
+    # Names
+    name: Optional[str] = None
+    name_en: Optional[str] = None
+    # Descriptions
+    short_description: Optional[str] = None
+    short_description_en: Optional[str] = None
+    description: Optional[str] = None
+    description_en: Optional[str] = None
+    # Tags
+    tags: Optional[str] = None
+    tags_en: Optional[str] = None
+    # Pricing & Inventory
+    regular_price: Optional[float] = None
+    sale_price: Optional[float] = None
+    stock: Optional[int] = None
+    is_in_stock: Optional[bool] = None
+    low_stock_threshold: Optional[int] = None
+    image_url: Optional[str] = None
+    gallery: Optional[List[str]] = None  # Additional images
+    brand: Optional[str] = None
+    # Variants (if provided, replaces all existing variants for this product)
+    variant_groups: Optional[List[ProductVariantGroupCreate]] = None
+
+
+class ProductBulkUpdate(BaseModel):
+    products: List[ProductBulkUpdateItem]
+
+
+class ProductBulkUpdateError(BaseModel):
+    id: int
+    seller_sku: Optional[str] = None
+    error: str
+
+
+class ProductBulkUpdateResponse(BaseModel):
+    updated: int
+    failed: int
+    errors: List[ProductBulkUpdateError] = []
+    products: List[ProductAdminResponse] = []
 
 
 # ---------- Order Admin Schemas ----------
@@ -257,7 +487,8 @@ class ValidateAccessTokenRequest(BaseModel):
 class ValidateAccessTokenResponse(BaseModel):
     """Response after validating a single-access token"""
     valid: bool
-    access_token: Optional[str] = None  # JWT token for the user
+    already_used: bool = False  # True if token was already used before
+    access_token: Optional[str] = None  # JWT token for the user (None if already_used)
     token_type: str = "bearer"
     redirect_url: Optional[str] = None
     user: Optional[UserAdminResponse] = None
