@@ -75,14 +75,16 @@ def localize_gallery(gallery: Optional[list], lang: str) -> list:
     Filter gallery images based on language.
     
     Rules:
-        - URL ending with _es (before extension) → Spanish only
-        - URL ending with _en (before extension) → English only
-        - No suffix → Both languages
+        - URL containing _es or _es_ → Spanish only
+        - URL containing _en or _en_ → English only
+        - No language marker → Both languages
     
     Examples:
         "image1.webp" → Both
         "promo_es.webp" → Spanish only
         "promo_en.webp" → English only
+        "gallery_011_es_12345.webp" → Spanish only
+        "gallery_011_en_12345.webp" → English only
     
     Args:
         gallery: List of image URLs
@@ -100,13 +102,18 @@ def localize_gallery(gallery: Optional[list], lang: str) -> list:
     for url in gallery:
         if not url:
             continue
-            
-        # Get filename without extension
-        # e.g., "https://s3.../promo_es.webp" → check for "_es" before ".webp"
+        
         url_lower = url.lower()
         
         # Check if it's for the OTHER language (exclude it)
-        if f"_{other_lang}." in url_lower or url_lower.endswith(f"_{other_lang}"):
+        # Patterns: _en. or _en_ or ends with _en
+        is_other_lang = (
+            f"_{other_lang}." in url_lower or 
+            f"_{other_lang}_" in url_lower or 
+            url_lower.endswith(f"_{other_lang}")
+        )
+        
+        if is_other_lang:
             continue
         
         # Include if it's for current language OR neutral (no language suffix)
