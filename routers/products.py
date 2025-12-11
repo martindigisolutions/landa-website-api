@@ -42,7 +42,8 @@ def get_categories(
     or `Accept-Language: es` for Spanish (default).
     
     **Category Filters:**
-    - `category`: Filter by category slug (e.g., "tintes", "shampoos")
+    - `category`: Filter by one or more category slugs (e.g., "tintes", "shampoos"). 
+      Use multiple `category` parameters to filter by multiple categories: `?category=tintes&category=shampoos`
     - `category_group`: Filter by category group slug (e.g., "tipo-de-producto")
     """,
     response_model=PaginatedProductResponse
@@ -56,7 +57,7 @@ def get_products(
     is_in_stock: Optional[bool] = Query(None, description="Filter by availability"),
     min_price: Optional[float] = Query(None, description="Minimum price filter"),
     max_price: Optional[float] = Query(None, description="Maximum price filter"),
-    category: Optional[str] = Query(None, description="Filter by category slug"),
+    category: Optional[List[str]] = Query(None, description="Filter by category slug(s). Can be repeated for multiple categories."),
     category_group: Optional[str] = Query(None, description="Filter by category group slug"),
     sort_by: Optional[str] = Query("name", description="Sort by: name, price_asc, price_desc, newest"),
     page: int = Query(1, ge=1),
