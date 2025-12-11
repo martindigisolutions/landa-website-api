@@ -1,0 +1,118 @@
+[
+    {
+      "group_name": "Tipo de producto",
+      "categories": [
+        {"name": "Accesorios", "slug": "accesorios", "current_color": "#636E72"},
+        {"name": "Acondicionador", "slug": "acondicionador", "current_color": "#4ECDC4"},
+        {"name": "Alisados Y Botox", "slug": "alisados", "current_color": "#99CAFF"},
+        {"name": "Ampolletas", "slug": "ampollas", "current_color": "#a29bfe"},
+        {"name": "Crema para peinar", "slug": "crema-para-peinar", "current_color": "#FEC9DC"},
+        {"name": "Gel", "slug": "gel-mousse-espuma", "current_color": "#99E2D4"},
+        {"name": "Kit completo", "slug": "kit-completo", "current_color": "#FDCB6E"},
+        {"name": "Matizante", "slug": "matizante", "current_color": "#78057a"},
+        {"name": "Peroxido en crema", "slug": "peroxido-en-crema", "current_color": "#D6FF99"},
+        {"name": "Polvo decolorante", "slug": "polvo-decolorante", "current_color": "#E5EDA8"},
+        {"name": "Protectores Térmicos", "slug": "protectores-termicos", "current_color": "#99CAFF"},
+        {"name": "Shampoo", "slug": "shampoo", "current_color": "#FFC3C3"},
+        {"name": "Sérums y aceites", "slug": "sérums", "current_color": "#C4BDF5"},
+        {"name": "Tinte / Coloración", "slug": "tinte-coloración", "current_color": "#F3C5BB"},
+        {"name": "Tratamientos", "slug": "mascarilla-tratamiento", "current_color": "#B4E2EC"}
+      ]
+    },
+    {
+      "group_name": "Tipo de cabello",
+      "categories": [
+        {"name": "Afro", "slug": "afro", "current_color": "#8B4513"},
+        {"name": "Cabello frizzado", "slug": "antifrizz", "current_color": "#A1F4FA"},
+        {"name": "Fino", "slug": "fino", "current_color": "#FFE4E1"},
+        {"name": "Grueso", "slug": "grueso", "current_color": "#F1D9F1"},
+        {"name": "Liso", "slug": "liso", "current_color": "#F5FAFE"},
+        {"name": "Maltratados, Procesado químicamente", "slug": "maltratados-procesado-quimicamente", "current_color": "#ff0066"},
+        {"name": "Ondulado", "slug": "ondulado", "current_color": "#ECF7F9"},
+        {"name": "Rizado", "slug": "rizado", "current_color": "#E2F5E2"},
+        {"name": "Rojos o Cobrizos", "slug": "rojos-o-cobrizos", "current_color": "#d64e05"},
+        {"name": "Rubio, decolorado, mechas o canas", "slug": "rubio-decoloradomechas-o-canas", "current_color": "#FFDE99"},
+        {"name": "Seco y quebradizo", "slug": "seco-y-quebradizo", "current_color": "#9BE3A7"},
+        {"name": "Teñidos", "slug": "tenidos", "current_color": "#FFA399"},
+        {"name": "Todo tipo de cabello", "slug": "todo-tipo-de-cabello", "current_color": "#99CAFF"}
+      ]
+    },
+    {
+      "group_name": "Necesidad / beneficio",
+      "categories": [
+        {"name": "Peinado y Fijacion", "slug": "peinado-y-fijacion", "current_color": "#00bfff"},
+        {"name": "Aclarado intensivo", "slug": "aclarado-intensivo", "current_color": "#FCFCE1"},
+        {"name": "Anti frizz", "slug": "anti-frizz", "current_color": "#ADEBAD"},
+        {"name": "Brillo", "slug": "brillo", "current_color": "#FFEF99"},
+        {"name": "Caspa / cuero cabelludo sensible", "slug": "caspa-cuero-cabelludo-sensible", "current_color": "#CFEBF7"},
+        {"name": "Control de caída", "slug": "control-de-caída", "current_color": "#228B22"},
+        {"name": "Crecimiento capilar", "slug": "crecimiento-capilar", "current_color": "#98FB98"},
+        {"name": "Cuidado del Alisado y Botox", "slug": "cuidado-del-alisado-y-botox", "current_color": "#007bff"},
+        {"name": "Filtro UV", "slug": "filtro-uv", "current_color": "#FFE399"},
+        {"name": "Hidratación", "slug": "hidratación", "current_color": "#99EBEC"},
+        {"name": "Limpieza profunda", "slug": "limpieza-profunda", "current_color": "#99FF9F"},
+        {"name": "Matizante / neutralización de tonos", "slug": "matizante-neutralizacion-de-tonos", "current_color": "#b043f9"},
+        {"name": "No volátil", "slug": "no-volatil", "current_color": "#ff00ff"},
+        {"name": "Protección del color", "slug": "protección-del-color", "current_color": "#D3C5F0"},
+        {"name": "Protección térmica", "slug": "protección-térmica", "current_color": "#FFC0B5"},
+        {"name": "Reduce el daño químico", "slug": "reduce-el-dano-quimico", "current_color": "#FFD999"},
+        {"name": "Repara puntas abiertas", "slug": "repara-puntas-abiertas", "current_color": "#ff0000"},
+        {"name": "Reparación / reconstrucción", "slug": "reparación-reconstrucción", "current_color": "#FFB499"},
+        {"name": "Volumen", "slug": "volumen", "current_color": "#FF69B4"}
+      ]
+    },
+    {
+      "group_name": "Ingredientes clave",
+      "categories": [
+        {"name": "Aceite de Romero", "slug": "aceite-de-romero", "current_color": "#116927"},
+        {"name": "Aceite de aguacate", "slug": "aceite-de-aguacate", "current_color": "#00ff40"},
+        {"name": "Aceite de almendra", "slug": "aceite-de-almendra", "current_color": "#ff8800"},
+        {"name": "Aceite de argán", "slug": "aceite-de-argán", "current_color": "#F0DBA5"},
+        {"name": "Aceite de coco", "slug": "aceite-de-coco", "current_color": "#FFFDF9"},
+        {"name": "Agua micelar", "slug": "agua-micelar", "current_color": "#00bfff"},
+        {"name": "Aloe Vera", "slug": "aloe-vera", "current_color": "#A2DD9E"},
+        {"name": "Aminogen Complex", "slug": "aminogen-complex", "current_color": "#00ff00"},
+        {"name": "Antioxidantes", "slug": "antioxidantes", "current_color": "#00eeff"},
+        {"name": "Biotina", "slug": "biotina", "current_color": "#00FF7F"},
+        {"name": "Colágeno", "slug": "colágeno", "current_color": "#FF1493"},
+        {"name": "Creatina", "slug": "creatina", "current_color": "#ff0019"},
+        {"name": "Células Madre Vegetales", "slug": "celulas-madre-vegetales", "current_color": "#02c519"},
+        {"name": "D-Pantenol", "slug": "d-pantenol", "current_color": "#00b3ff"},
+        {"name": "Extracto de placenta", "slug": "extracto-de-placenta", "current_color": "#ffc800"},
+        {"name": "Extractos de avellana", "slug": "extractos-de-avellana", "current_color": "#fbff00"},
+        {"name": "Keratina", "slug": "keratina", "current_color": "#D09999"},
+        {"name": "Lanolina", "slug": "lanolina", "current_color": "#00b3ff"},
+        {"name": "Manteca de cupuaçu", "slug": "manteca-de-cupuacu", "current_color": "#f1a1f7"},
+        {"name": "Manteca de karité", "slug": "manteca-de-karité", "current_color": "#F5DEB3"},
+        {"name": "Pigmentos Violetas", "slug": "pigmentos-violetas", "current_color": "#de0ced"},
+        {"name": "Pigmentos azules", "slug": "pigmentos-azules", "current_color": "#0000ff"},
+        {"name": "Proteína B3", "slug": "proteina-b3", "current_color": "#fff700"},
+        {"name": "Proteína de trigo", "slug": "proteína-de-trigo", "current_color": "#F9F5D1"},
+        {"name": "Proteínas de Seda", "slug": "proteinas-de-seda", "current_color": "#ee00ff"},
+        {"name": "Sin parabenos", "slug": "sin-parabenos", "current_color": "#CFEBFD"},
+        {"name": "Sin sulfatos", "slug": "sin-sulfatos", "current_color": "#D2F8D2"},
+        {"name": "Sistema Dust Free", "slug": "sistema-dust-free", "current_color": "#1e00ff"},
+        {"name": "Ácido hialurónico", "slug": "ácido-hialurónico", "current_color": "#E0E0E0"}
+      ]
+    },
+    {
+      "group_name": "Características especiales",
+      "categories": [
+        {"name": "Cruelty free", "slug": "cruelty-free", "current_color": "#FFC3E1"},
+        {"name": "Orgánico / Natural", "slug": "orgánico-natural", "current_color": "#8FBC8F"},
+        {"name": "Profesional / Salón", "slug": "profesional-salón", "current_color": "#B3C3F3"},
+        {"name": "Vegano", "slug": "vegano", "current_color": "#228B22"}
+      ]
+    },
+    {
+      "group_name": "Coloración",
+      "categories": [
+        {"name": "Cobertura de canas", "slug": "cobertura-de-canas", "current_color": "#E5E5E5"},
+        {"name": "Decolorantes", "slug": "decolorantes", "current_color": "#FFFF99"},
+        {"name": "Fantasía", "slug": "fantasía", "current_color": "#FF99FF"},
+        {"name": "Permanente", "slug": "permanente", "current_color": "#D09999"},
+        {"name": "Semi permanente", "slug": "semi-permanente", "current_color": "#DC143C"},
+        {"name": "Sin amoníaco", "slug": "sin-amoníaco", "current_color": "#98FB98"}
+      ]
+    }
+  ]
