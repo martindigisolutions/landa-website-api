@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from database import get_db
 from services import checkout_service
+from services import shipping_service
 from schemas.checkout import (
     CheckoutSessionCreate, 
     CheckoutOptionsRequest, 
@@ -11,7 +12,9 @@ from schemas.checkout import (
     OrderSummary,
     OrderDetailResponse,
     UpdateAddressRequest,
-    UpdateAddressResponse
+    UpdateAddressResponse,
+    CalculateShippingRequest,
+    CalculateShippingResponse
 )
 from typing import List, Optional
 
@@ -72,3 +75,34 @@ def update_order_address(order_id: str, data: UpdateAddressRequest, db: Session 
     Retorna 409 si la orden ya no permite modificaciones.
     """
     return checkout_service.update_order_address(order_id, data.user_id, data.address.model_dump(), db)
+
+
+@router.post("/calculate-shipping", response_model=CalculateShippingResponse, summary="Calcular costo de envío")
+def calculate_shipping(data: CalculateShippingRequest, db: Session = Depends(get_db)):
+    """
+    Calcular el costo de envío basado en el contenido del carrito y las reglas configuradas.
+    
+    El cálculo considera:
+    - Peso total de los productos
+    - Reglas de libras gratis por productos específicos o categorías
+    - Cargos mínimos por peso bajo
+    - Tarifas base por libra
+    
+    Además, retorna **sugerencias** cuando el cliente está cerca (80%+) de:
+    - Completar una regla de libras gratis (ej: "agrega 2 productos más para envío gratis")
+    - Llenar capacidad de peso gratis (ej: "puedes agregar 0.5 lbs más por el mismo costo")
+    
+    **Request:**
+    - `products`: Lista de productos con product_id, quantity y variant_id opcional
+    - `address`: Dirección de envío (city, state, zip, country)
+    
+    **Response:**
+    - `total_weight_lbs`: Peso total del carrito
+    - `free_weight_lbs`: Libras cubiertas por envío gratis
+    - `billable_weight_lbs`: Libras a cobrar
+    - `shipping_cost`: Costo final de envío en USD
+    - `applied_rules`: Lista de reglas aplicadas
+    - `suggestions`: Sugerencias para ahorrar en envío
+    - `summary`: Mensaje resumen (ej: "Envío: $5.99" o "¡Envío gratis!")
+    """
+    return shipping_service.calculate_shipping(data, db)

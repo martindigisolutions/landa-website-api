@@ -106,3 +106,55 @@ class UpdateAddressResponse(BaseModel):
     success: bool
     message: str
     order_id: str
+
+
+# === Schemas para cálculo de shipping ===
+
+class CalculateShippingRequest(BaseModel):
+    """Request to calculate shipping cost based on cart contents"""
+    products: List[ProductInCart]
+    address: Address
+
+
+class ShippingSuggestion(BaseModel):
+    """Suggestion to help customer save on shipping"""
+    suggestion_type: str  # "add_products_for_free_weight", "fill_remaining_weight"
+    message: str  # Human-readable suggestion in Spanish
+    message_en: Optional[str] = None  # English version
+    
+    # For add_products_for_free_weight
+    products_needed: Optional[int] = None  # How many more products needed
+    brand: Optional[str] = None  # Brand to buy (for product_type rules)
+    category_id: Optional[int] = None  # Category to buy (for category rules)
+    category_name: Optional[str] = None  # Category name for display
+    potential_savings: Optional[float] = None  # How much they could save
+    
+    # For fill_remaining_weight
+    remaining_lbs: Optional[float] = None  # How many more lbs fit in free tier
+
+
+class AppliedShippingRule(BaseModel):
+    """Information about a rule that was applied"""
+    rule_name: str
+    rule_type: str
+    free_weight_granted: float  # How many lbs were made free by this rule
+    quantity_matched: Optional[int] = None  # How many products matched
+
+
+class CalculateShippingResponse(BaseModel):
+    """Response with shipping cost calculation and suggestions"""
+    # Calculated costs
+    total_weight_lbs: float
+    free_weight_lbs: float  # Weight covered by free shipping rules
+    billable_weight_lbs: float  # Weight to charge for
+    shipping_cost: float  # Final shipping cost in USD
+    
+    # Breakdown
+    applied_rules: List[AppliedShippingRule] = []
+    
+    # Suggestions for saving money (only shown if >= 80% progress toward a rule)
+    suggestions: List[ShippingSuggestion] = []
+    
+    # Summary message
+    summary: str  # e.g., "Shipping: $5.99" or "Free shipping!"
+    summary_en: Optional[str] = None

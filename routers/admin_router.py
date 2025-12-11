@@ -18,7 +18,9 @@ from schemas.admin import (
     UserAdminCreate, UserAdminResponse, UserAdminCreatedResponse, PaginatedUsersResponse,
     SingleAccessTokenCreate, SingleAccessTokenResponse,
     UserSuspendRequest, UserBlockRequest, UserActionResponse,
-    CategoryGroupResponse
+    CategoryGroupResponse,
+    ShippingRuleCreate, ShippingRuleUpdate, ShippingRuleResponse,
+    ShippingRulesSyncRequest, ShippingRulesSyncResponse
 )
 from schemas.product import ProductSchema
 
@@ -521,4 +523,118 @@ def unblock_user(
     db: Session = Depends(get_db)
 ):
     return admin_service.unblock_user(user_id, db)
+
+
+# ==================== SHIPPING RULES MANAGEMENT ====================
+# These endpoints require shipping:read or shipping:write scope
+
+@router.post(
+    "/shipping-rules/sync",
+    response_model=ShippingRulesSyncResponse,
+    summary="Sync all shipping rules",
+    description="""Sync all shipping rules from the admin dashboard.
+    
+    **This REPLACES all existing rules with the new ones.**
+    
+    **Rule Types:**
+    - `free_weight_per_product`: Every X products from selected SKUs → Z lbs free
+      - Requires: product_quantity, selected_products (array of seller_sku), free_weight_lbs
+    - `free_weight_per_category`: Every X products from selected categories → Z lbs free
+      - Requires: product_quantity, selected_categories (array of category slugs), free_weight_lbs
+    - `minimum_weight_charge`: If total weight < X lbs → charge $Y
+      - Requires: minimum_weight_lbs, charge_amount
+    - `base_rate`: Rate per lb for remaining billable weight
+      - Requires: rate_per_lb
+    
+    **Priority:** Lower number = higher priority (evaluated first).
+    
+    Returns warnings for SKUs or categories not found in database (non-blocking).
+    """
+)
+def sync_shipping_rules(
+    data: ShippingRulesSyncRequest,
+    app=Depends(admin_service.require_scope("shipping:write")),
+    db: Session = Depends(get_db)
+):
+    return admin_service.sync_shipping_rules(data, db)
+
+
+@router.post(
+    "/shipping-rules",
+    response_model=ShippingRuleResponse,
+    summary="Create shipping rule",
+    description="""Create a single new shipping rule.
+    
+    **Rule Types:**
+    - `free_weight_per_product`: Every X products from selected SKUs → Z lbs free
+    - `free_weight_per_category`: Every X products from selected categories → Z lbs free
+    - `minimum_weight_charge`: If total weight < X lbs → charge $Y
+    - `base_rate`: Rate per lb for remaining billable weight
+    
+    **Priority:** Lower number = higher priority (evaluated first).
+    """
+)
+def create_shipping_rule(
+    data: ShippingRuleCreate,
+    app=Depends(admin_service.require_scope("shipping:write")),
+    db: Session = Depends(get_db)
+):
+    return admin_service.create_shipping_rule(data, db)
+
+
+@router.get(
+    "/shipping-rules",
+    response_model=List[ShippingRuleResponse],
+    summary="List shipping rules",
+    description="Get all shipping rules with optional filters. Rules are ordered by priority."
+)
+def list_shipping_rules(
+    rule_type: Optional[str] = Query(None, description="Filter by rule type (product_type, category, weight_threshold, base_rate)"),
+    is_active: Optional[bool] = Query(None, description="Filter by active status"),
+    app=Depends(admin_service.require_scope("shipping:read")),
+    db: Session = Depends(get_db)
+):
+    return admin_service.list_shipping_rules(db, rule_type, is_active)
+
+
+@router.get(
+    "/shipping-rules/{rule_id}",
+    response_model=ShippingRuleResponse,
+    summary="Get shipping rule",
+    description="Get a specific shipping rule by ID."
+)
+def get_shipping_rule(
+    rule_id: int,
+    app=Depends(admin_service.require_scope("shipping:read")),
+    db: Session = Depends(get_db)
+):
+    return admin_service.get_shipping_rule(rule_id, db)
+
+
+@router.put(
+    "/shipping-rules/{rule_id}",
+    response_model=ShippingRuleResponse,
+    summary="Update shipping rule",
+    description="Update an existing shipping rule. Only provided fields will be updated."
+)
+def update_shipping_rule(
+    rule_id: int,
+    data: ShippingRuleUpdate,
+    app=Depends(admin_service.require_scope("shipping:write")),
+    db: Session = Depends(get_db)
+):
+    return admin_service.update_shipping_rule(rule_id, data, db)
+
+
+@router.delete(
+    "/shipping-rules/{rule_id}",
+    summary="Delete shipping rule",
+    description="Permanently delete a shipping rule."
+)
+def delete_shipping_rule(
+    rule_id: int,
+    app=Depends(admin_service.require_scope("shipping:write")),
+    db: Session = Depends(get_db)
+):
+    return admin_service.delete_shipping_rule(rule_id, db)
 

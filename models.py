@@ -74,6 +74,9 @@ class Product(Base):
     has_variants = Column(Boolean, default=False)
     brand = Column(String, nullable=True)
     
+    # Shipping
+    weight_lbs = Column(Float, default=0.0)  # Weight in pounds for shipping calculation
+    
     # Related products (stored as arrays of seller_sku strings)
     similar_products = Column(JSON, default=list)  # Array of seller_sku
     frequently_bought_together = Column(JSON, default=list)  # Array of seller_sku
@@ -255,3 +258,57 @@ class ProductCategory(Base):
     # Relationships
     product = relationship("Product", back_populates="product_categories")
     category = relationship("Category", back_populates="products")
+
+
+# ==================== SHIPPING RULE MODELS ====================
+
+class ShippingRule(Base):
+    """
+    Shipping rules for calculating shipping costs and free weight thresholds.
+    
+    Rule Types:
+    - "free_weight_per_product": Every X products from selected SKUs → Z lbs free
+    - "free_weight_per_category": Every X products from selected categories → Z lbs free
+    - "minimum_weight_charge": If total weight < X lbs → charge $Y
+    - "base_rate": Rate per lb for remaining billable weight
+    """
+    __tablename__ = "shipping_rules"
+
+    id = Column(Integer, primary_key=True, index=True)
+    
+    # Rule type
+    rule_type = Column(String, nullable=False, index=True)
+    
+    # Name/description for admin UI
+    name = Column(String, nullable=False)
+    
+    # For free_weight_per_product: list of seller_sku
+    selected_products = Column(JSON, default=list)  # ["sku1", "sku2", ...]
+    
+    # For free_weight_per_category: list of category slugs
+    selected_categories = Column(JSON, default=list)  # ["tintes", "extensiones", ...]
+    
+    # For free_weight rules: how many products needed to trigger
+    product_quantity = Column(Integer, nullable=True)
+    
+    # For free_weight rules: lbs granted when triggered
+    free_weight_lbs = Column(Float, nullable=True)
+    
+    # For minimum_weight_charge: minimum weight threshold
+    minimum_weight_lbs = Column(Float, nullable=True)
+    
+    # For minimum_weight_charge: amount to charge if under minimum
+    charge_amount = Column(Float, nullable=True)
+    
+    # For base_rate: rate per pound
+    rate_per_lb = Column(Float, nullable=True)
+    
+    # Rule ordering (lower = higher priority, evaluated first)
+    priority = Column(Integer, default=0)
+    
+    # Active flag
+    is_active = Column(Boolean, default=True)
+    
+    # Timestamps
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

@@ -12,7 +12,7 @@ from database import get_db
 from models import (
     Application, Product, ProductVariantGroup, ProductVariant, 
     Order, OrderItem, User, SingleAccessToken,
-    CategoryGroup, Category, ProductCategory
+    CategoryGroup, Category, ProductCategory, ShippingRule
 )
 from schemas.admin import (
     ApplicationCreate, ApplicationUpdate, ApplicationResponse, ApplicationCreatedResponse,
@@ -29,7 +29,9 @@ from schemas.admin import (
     UserAdminCreate, UserAdminResponse, UserAdminCreatedResponse, PaginatedUsersResponse,
     SingleAccessTokenCreate, SingleAccessTokenResponse,
     UserSuspendRequest, UserBlockRequest, UserActionResponse,
-    CategoryInput, CategoryResponse, CategoryGroupResponse, CategoryItemResponse
+    CategoryInput, CategoryResponse, CategoryGroupResponse, CategoryItemResponse,
+    ShippingRuleCreate, ShippingRuleUpdate, ShippingRuleResponse,
+    ShippingRulesSyncRequest, ShippingRulesSyncResponse
 )
 from config import SECRET_KEY, ALGORITHM, WHOLESALE_FRONTEND_URL, SINGLE_ACCESS_TOKEN_EXPIRE_HOURS
 
@@ -50,6 +52,8 @@ AVAILABLE_SCOPES = [
     "users:read",
     "users:write",
     "stats:read",
+    "shipping:read",
+    "shipping:write",
 ]
 
 # Special scope that grants all permissions
@@ -672,6 +676,7 @@ def _product_to_response(product: Product) -> ProductAdminResponse:
         low_stock_threshold=product.low_stock_threshold,
         has_variants=product.has_variants,
         brand=product.brand,
+        weight_lbs=product.weight_lbs or 0.0,
         # Timestamps
         created_at=product.created_at,
         updated_at=product.updated_at,
@@ -1644,4 +1649,199 @@ def unblock_user(user_id: int, db: Session) -> UserActionResponse:
         message=f"User '{user.first_name or user.email or user.phone}' has been unblocked",
         user=UserAdminResponse.model_validate(user)
     )
+
+
+# ---------- Shipping Rule Management ----------
+
+VALID_RULE_TYPES = ["free_weight_per_product", "free_weight_per_category", "minimum_weight_charge", "base_rate"]
+
+
+def _validate_shipping_rule(data: dict, rule_type: str) -> List[str]:
+    """
+    Validate shipping rule data based on rule type.
+    Returns list of warning messages (non-blocking).
+    Raises HTTPException for blocking errors.
+    """
+    warnings = []
+    
+    if rule_type not in VALID_RULE_TYPES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid rule_type '{rule_type}'. Valid values: {VALID_RULE_TYPES}"
+        )
+    
+    if rule_type == "free_weight_per_product":
+        if not data.get("selected_products"):
+            raise HTTPException(status_code=400, detail="free_weight_per_product rule requires selected_products (array of seller_sku)")
+        if not data.get("product_quantity"):
+            raise HTTPException(status_code=400, detail="free_weight_per_product rule requires product_quantity")
+        if not data.get("free_weight_lbs"):
+            raise HTTPException(status_code=400, detail="free_weight_per_product rule requires free_weight_lbs")
+    
+    elif rule_type == "free_weight_per_category":
+        if not data.get("selected_categories"):
+            raise HTTPException(status_code=400, detail="free_weight_per_category rule requires selected_categories (array of category slugs)")
+        if not data.get("product_quantity"):
+            raise HTTPException(status_code=400, detail="free_weight_per_category rule requires product_quantity")
+        if not data.get("free_weight_lbs"):
+            raise HTTPException(status_code=400, detail="free_weight_per_category rule requires free_weight_lbs")
+    
+    elif rule_type == "minimum_weight_charge":
+        if data.get("minimum_weight_lbs") is None:
+            raise HTTPException(status_code=400, detail="minimum_weight_charge rule requires minimum_weight_lbs")
+        if data.get("charge_amount") is None:
+            raise HTTPException(status_code=400, detail="minimum_weight_charge rule requires charge_amount")
+    
+    elif rule_type == "base_rate":
+        if data.get("rate_per_lb") is None:
+            raise HTTPException(status_code=400, detail="base_rate rule requires rate_per_lb")
+    
+    return warnings
+
+
+def _validate_skus_exist(selected_products: List[str], db: Session) -> List[str]:
+    """Check if SKUs exist in database. Returns list of warnings for missing SKUs."""
+    warnings = []
+    if selected_products:
+        existing_skus = set(
+            sku for (sku,) in db.query(Product.seller_sku)
+            .filter(Product.seller_sku.in_(selected_products))
+            .all()
+        )
+        missing_skus = set(selected_products) - existing_skus
+        if missing_skus:
+            warnings.append(f"SKUs not found in database (rule will still apply): {', '.join(missing_skus)}")
+    return warnings
+
+
+def _validate_categories_exist(selected_categories: List[str], db: Session) -> List[str]:
+    """Check if category slugs exist in database. Returns list of warnings for missing categories."""
+    warnings = []
+    if selected_categories:
+        existing_slugs = set(
+            slug for (slug,) in db.query(Category.slug)
+            .filter(Category.slug.in_(selected_categories))
+            .all()
+        )
+        missing_slugs = set(selected_categories) - existing_slugs
+        if missing_slugs:
+            warnings.append(f"Category slugs not found in database (rule will still apply): {', '.join(missing_slugs)}")
+    return warnings
+
+
+def sync_shipping_rules(data: ShippingRulesSyncRequest, db: Session) -> ShippingRulesSyncResponse:
+    """
+    Sync all shipping rules from dashboard.
+    This REPLACES all existing rules with the new ones.
+    """
+    warnings = []
+    
+    # Validate all rules first
+    for rule_input in data.rules:
+        rule_data = rule_input.model_dump()
+        _validate_shipping_rule(rule_data, rule_input.rule_type)
+        
+        # Validate SKUs and categories exist (non-blocking warnings)
+        if rule_input.selected_products:
+            warnings.extend(_validate_skus_exist(rule_input.selected_products, db))
+        if rule_input.selected_categories:
+            warnings.extend(_validate_categories_exist(rule_input.selected_categories, db))
+    
+    # Delete all existing rules
+    db.query(ShippingRule).delete()
+    db.flush()
+    
+    # Create new rules
+    for rule_input in data.rules:
+        rule_data = rule_input.model_dump(exclude={'id'})  # Exclude dashboard ID, we use our own
+        rule = ShippingRule(**rule_data)
+        db.add(rule)
+    
+    db.commit()
+    
+    return ShippingRulesSyncResponse(
+        success=True,
+        synced=len(data.rules),
+        message=f"Successfully synced {len(data.rules)} shipping rules",
+        warnings=warnings
+    )
+
+
+def create_shipping_rule(data: ShippingRuleCreate, db: Session) -> ShippingRuleResponse:
+    """Create a new shipping rule"""
+    rule_data = data.model_dump(exclude={'id'})
+    _validate_shipping_rule(rule_data, data.rule_type)
+    
+    rule = ShippingRule(**rule_data)
+    db.add(rule)
+    db.commit()
+    db.refresh(rule)
+    
+    return ShippingRuleResponse.model_validate(rule)
+
+
+def list_shipping_rules(db: Session, rule_type: Optional[str] = None, is_active: Optional[bool] = None) -> List[ShippingRuleResponse]:
+    """List all shipping rules with optional filters"""
+    query = db.query(ShippingRule)
+    
+    if rule_type:
+        query = query.filter(ShippingRule.rule_type == rule_type)
+    
+    if is_active is not None:
+        query = query.filter(ShippingRule.is_active == is_active)
+    
+    rules = query.order_by(ShippingRule.priority, ShippingRule.id).all()
+    return [ShippingRuleResponse.model_validate(r) for r in rules]
+
+
+def get_shipping_rule(rule_id: int, db: Session) -> ShippingRuleResponse:
+    """Get a single shipping rule by ID"""
+    rule = db.query(ShippingRule).filter(ShippingRule.id == rule_id).first()
+    if not rule:
+        raise HTTPException(status_code=404, detail="Shipping rule not found")
+    return ShippingRuleResponse.model_validate(rule)
+
+
+def update_shipping_rule(rule_id: int, data: ShippingRuleUpdate, db: Session) -> ShippingRuleResponse:
+    """Update a shipping rule"""
+    rule = db.query(ShippingRule).filter(ShippingRule.id == rule_id).first()
+    if not rule:
+        raise HTTPException(status_code=404, detail="Shipping rule not found")
+    
+    update_data = data.model_dump(exclude_unset=True)
+    
+    # Build validation data with current values as defaults
+    new_rule_type = update_data.get("rule_type", rule.rule_type)
+    validation_data = {
+        "selected_products": update_data.get("selected_products", rule.selected_products),
+        "selected_categories": update_data.get("selected_categories", rule.selected_categories),
+        "product_quantity": update_data.get("product_quantity", rule.product_quantity),
+        "free_weight_lbs": update_data.get("free_weight_lbs", rule.free_weight_lbs),
+        "minimum_weight_lbs": update_data.get("minimum_weight_lbs", rule.minimum_weight_lbs),
+        "charge_amount": update_data.get("charge_amount", rule.charge_amount),
+        "rate_per_lb": update_data.get("rate_per_lb", rule.rate_per_lb),
+    }
+    _validate_shipping_rule(validation_data, new_rule_type)
+    
+    for field, value in update_data.items():
+        setattr(rule, field, value)
+    
+    rule.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(rule)
+    
+    return ShippingRuleResponse.model_validate(rule)
+
+
+def delete_shipping_rule(rule_id: int, db: Session) -> dict:
+    """Delete a shipping rule"""
+    rule = db.query(ShippingRule).filter(ShippingRule.id == rule_id).first()
+    if not rule:
+        raise HTTPException(status_code=404, detail="Shipping rule not found")
+    
+    rule_name = rule.name
+    db.delete(rule)
+    db.commit()
+    
+    return {"msg": f"Shipping rule '{rule_name}' deleted successfully"}
 

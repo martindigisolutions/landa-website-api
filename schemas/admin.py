@@ -262,6 +262,7 @@ class ProductCreate(BaseModel):
     low_stock_threshold: int = 5
     has_variants: bool = False
     brand: Optional[str] = None
+    weight_lbs: float = 0.0  # Weight in pounds for shipping calculation
     variant_groups: List[ProductVariantGroupCreate] = []  # Include variant groups on creation
     categories: List[CategoryInput] = []  # Categories for the product
     # Related products (arrays of seller_sku strings)
@@ -306,6 +307,7 @@ class ProductUpdate(BaseModel):
     low_stock_threshold: Optional[int] = None
     has_variants: Optional[bool] = None
     brand: Optional[str] = None
+    weight_lbs: Optional[float] = None  # Weight in pounds for shipping calculation
     # Variants (if provided, replaces all existing variants)
     variant_groups: Optional[List[ProductVariantGroupCreate]] = None
     # Categories (if provided, replaces all existing categories)
@@ -344,6 +346,7 @@ class ProductAdminResponse(BaseModel):
     low_stock_threshold: Optional[int] = None
     has_variants: Optional[bool] = None
     brand: Optional[str] = None
+    weight_lbs: Optional[float] = None  # Weight in pounds for shipping calculation
     # Timestamps
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
@@ -406,6 +409,7 @@ class ProductBulkUpdateItem(BaseModel):
     image_url: Optional[str] = None
     gallery: Optional[List[str]] = None  # Additional images
     brand: Optional[str] = None
+    weight_lbs: Optional[float] = None  # Weight in pounds for shipping calculation
     # Variants (if provided, replaces all existing variants for this product)
     variant_groups: Optional[List[ProductVariantGroupCreate]] = None
     # Categories (if provided, replaces all existing categories for this product)
@@ -602,3 +606,98 @@ class UserActionResponse(BaseModel):
     success: bool
     message: str
     user: UserAdminResponse
+
+
+# ---------- Shipping Rule Schemas ----------
+
+class ShippingRuleInput(BaseModel):
+    """
+    Input for a shipping rule (used in sync and create).
+    
+    Rule Types:
+    - "free_weight_per_product": Every X products from selected SKUs → Z lbs free
+      - Requires: product_quantity, selected_products, free_weight_lbs
+    - "free_weight_per_category": Every X products from selected categories → Z lbs free
+      - Requires: product_quantity, selected_categories, free_weight_lbs
+    - "minimum_weight_charge": If total weight < X lbs → charge $Y
+      - Requires: minimum_weight_lbs, charge_amount
+    - "base_rate": Rate per lb for remaining billable weight
+      - Requires: rate_per_lb
+    """
+    id: Optional[int] = None  # Optional - used when syncing from dashboard
+    rule_type: str  # "free_weight_per_product", "free_weight_per_category", "minimum_weight_charge", "base_rate"
+    name: str
+    
+    # For free_weight_per_product
+    selected_products: List[str] = []  # Array of seller_sku
+    
+    # For free_weight_per_category
+    selected_categories: List[str] = []  # Array of category slugs
+    
+    # For free_weight rules
+    product_quantity: Optional[int] = None  # X products needed to trigger
+    free_weight_lbs: Optional[float] = None  # Z lbs granted
+    
+    # For minimum_weight_charge
+    minimum_weight_lbs: Optional[float] = None  # Minimum weight threshold
+    charge_amount: Optional[float] = None  # Amount to charge if under minimum
+    
+    # For base_rate
+    rate_per_lb: Optional[float] = None  # Rate per pound
+    
+    priority: int = 0  # Lower = higher priority (evaluated first)
+    is_active: bool = True
+
+
+class ShippingRuleCreate(ShippingRuleInput):
+    """Create a single shipping rule"""
+    pass
+
+
+class ShippingRuleUpdate(BaseModel):
+    """Update a shipping rule (all fields optional)"""
+    rule_type: Optional[str] = None
+    name: Optional[str] = None
+    selected_products: Optional[List[str]] = None
+    selected_categories: Optional[List[str]] = None
+    product_quantity: Optional[int] = None
+    free_weight_lbs: Optional[float] = None
+    minimum_weight_lbs: Optional[float] = None
+    charge_amount: Optional[float] = None
+    rate_per_lb: Optional[float] = None
+    priority: Optional[int] = None
+    is_active: Optional[bool] = None
+
+
+class ShippingRuleResponse(BaseModel):
+    """Response for a shipping rule"""
+    id: int
+    rule_type: str
+    name: str
+    selected_products: List[str] = []
+    selected_categories: List[str] = []
+    product_quantity: Optional[int] = None
+    free_weight_lbs: Optional[float] = None
+    minimum_weight_lbs: Optional[float] = None
+    charge_amount: Optional[float] = None
+    rate_per_lb: Optional[float] = None
+    priority: int
+    is_active: bool
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class ShippingRulesSyncRequest(BaseModel):
+    """Request to sync all shipping rules from dashboard (replaces all existing)"""
+    rules: List[ShippingRuleInput]
+
+
+class ShippingRulesSyncResponse(BaseModel):
+    """Response after syncing shipping rules"""
+    success: bool
+    synced: int
+    message: str
+    warnings: List[str] = []  # Non-blocking warnings (e.g., SKU not found)
