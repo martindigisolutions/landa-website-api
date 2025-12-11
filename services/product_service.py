@@ -220,7 +220,7 @@ def get_products(
     is_in_stock: Optional[bool] = None,
     min_price: Optional[float] = None,
     max_price: Optional[float] = None,
-    category: Optional[str] = None,
+    category: Optional[List[str]] = None,
     category_group: Optional[str] = None,
     page: int = 1,
     page_size: int = 20,
@@ -254,9 +254,9 @@ def get_products(
     if max_price is not None:
         query = query.filter(Product.regular_price <= max_price)
     
-    # Filter by category slug
+    # Filter by category slug(s)
     if category:
-        query = query.join(ProductCategory).join(Category).filter(Category.slug == category)
+        query = query.join(ProductCategory).join(Category).filter(Category.slug.in_(category))
     
     # Filter by category group slug
     if category_group:
