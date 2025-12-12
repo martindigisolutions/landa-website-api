@@ -248,11 +248,9 @@ class ProductCreate(BaseModel):
     # Tags
     tags: Optional[str] = None  # Spanish (semicolon separated)
     tags_en: Optional[str] = None  # English (semicolon separated)
-    # Pricing & Inventory
+    # Pricing (stock is managed separately via inventory endpoints)
     regular_price: float
     sale_price: Optional[float] = None
-    stock: Optional[int] = 0
-    is_in_stock: bool = True
     restock_date: Optional[date] = None
     is_favorite: bool = False
     notify_when_available: bool = False
@@ -281,6 +279,7 @@ class ProductBulkError(BaseModel):
 
 
 class ProductUpdate(BaseModel):
+    """Update product catalog info. Stock is managed via inventory endpoints."""
     seller_sku: Optional[str] = None
     # Names
     name: Optional[str] = None
@@ -293,11 +292,9 @@ class ProductUpdate(BaseModel):
     # Tags
     tags: Optional[str] = None
     tags_en: Optional[str] = None
-    # Pricing & Inventory
+    # Pricing (stock is managed separately via inventory endpoints)
     regular_price: Optional[float] = None
     sale_price: Optional[float] = None
-    stock: Optional[int] = None
-    is_in_stock: Optional[bool] = None
     restock_date: Optional[date] = None
     is_favorite: Optional[bool] = None
     notify_when_available: Optional[bool] = None
@@ -385,8 +382,9 @@ class ProductBulkDeleteResponse(BaseModel):
     errors: List[ProductBulkDeleteError] = []
 
 
-# Bulk Update
+# Bulk Update (catalog info only - stock is managed via inventory endpoints)
 class ProductBulkUpdateItem(BaseModel):
+    """Update product catalog info. Stock is managed via inventory endpoints."""
     id: int  # Product ID to update
     seller_sku: Optional[str] = None
     # Names
@@ -400,11 +398,9 @@ class ProductBulkUpdateItem(BaseModel):
     # Tags
     tags: Optional[str] = None
     tags_en: Optional[str] = None
-    # Pricing & Inventory
+    # Pricing (stock is managed separately via inventory endpoints)
     regular_price: Optional[float] = None
     sale_price: Optional[float] = None
-    stock: Optional[int] = None
-    is_in_stock: Optional[bool] = None
     low_stock_threshold: Optional[int] = None
     image_url: Optional[str] = None
     gallery: Optional[List[str]] = None  # Additional images
@@ -701,3 +697,159 @@ class ShippingRulesSyncResponse(BaseModel):
     synced: int
     message: str
     warnings: List[str] = []  # Non-blocking warnings (e.g., SKU not found)
+
+
+# ---------- Inventory Schemas ----------
+
+class InventoryUpdateSingle(BaseModel):
+    """Update inventory for a single product"""
+    stock: int  # New stock quantity
+    is_in_stock: Optional[bool] = None  # If not provided, auto-calculated from stock > 0
+
+
+class InventoryUpdateItem(BaseModel):
+    """Item in bulk inventory update"""
+    seller_sku: str  # Product SKU
+    stock: int  # New stock quantity
+    is_in_stock: Optional[bool] = None  # If not provided, auto-calculated from stock > 0
+
+
+class InventoryBulkUpdate(BaseModel):
+    """Bulk update inventory for multiple products"""
+    products: List[InventoryUpdateItem]
+
+
+class InventoryUpdateResponse(BaseModel):
+    """Response for single inventory update"""
+    seller_sku: str
+    product_id: int
+    stock: int
+    is_in_stock: bool
+    message: str
+
+
+class InventoryBulkUpdateError(BaseModel):
+    """Error for a single item in bulk update"""
+    seller_sku: str
+    error: str
+
+
+class InventoryBulkUpdateResponse(BaseModel):
+    """Response for bulk inventory update"""
+    updated: int
+    failed: int
+    errors: List[InventoryBulkUpdateError] = []
+    results: List[InventoryUpdateResponse] = []
+
+
+# ---------- Variant Inventory Schemas ----------
+
+class VariantInventoryUpdateSingle(BaseModel):
+    """Update inventory for a single variant"""
+    stock: int  # New stock quantity
+    is_in_stock: Optional[bool] = None  # If not provided, auto-calculated from stock > 0
+
+
+class VariantInventoryUpdateItem(BaseModel):
+    """Item in bulk variant inventory update"""
+    seller_sku: str  # Variant SKU
+    stock: int  # New stock quantity
+    is_in_stock: Optional[bool] = None  # If not provided, auto-calculated from stock > 0
+
+
+class VariantInventoryBulkUpdate(BaseModel):
+    """Bulk update inventory for multiple variants"""
+    variants: List[VariantInventoryUpdateItem]
+
+
+class VariantInventoryUpdateResponse(BaseModel):
+    """Response for single variant inventory update"""
+    variant_id: int
+    seller_sku: Optional[str] = None
+    variant_name: str
+    product_id: int
+    product_name: str
+    stock: int
+    is_in_stock: bool
+    message: str
+
+
+class VariantInventoryBulkUpdateError(BaseModel):
+    """Error for a single variant in bulk update"""
+    seller_sku: str
+    error: str
+
+
+class VariantInventoryBulkUpdateResponse(BaseModel):
+    """Response for bulk variant inventory update"""
+    updated: int
+    failed: int
+    errors: List[VariantInventoryBulkUpdateError] = []
+    results: List[VariantInventoryUpdateResponse] = []
+
+
+# ---------- Inventory List Schemas ----------
+
+class InventoryItem(BaseModel):
+    """Single item in inventory list (product or variant)"""
+    id: int
+    seller_sku: Optional[str] = None
+    name: str
+    stock: int
+    is_in_stock: bool
+    is_variant: bool
+    image_url: Optional[str] = None
+    # Only for variants
+    parent_id: Optional[int] = None
+    parent_sku: Optional[str] = None
+    parent_name: Optional[str] = None
+    variant_type: Optional[str] = None
+    group_name: Optional[str] = None  # Category within variant type (e.g., "Naturales")
+
+
+class InventoryListResponse(BaseModel):
+    """Response for inventory list endpoint"""
+    total_items: int
+    total_products: int  # Count of simple products
+    total_variants: int  # Count of variants
+    items: List[InventoryItem]
+
+
+# ---------- Unified Inventory Update Schemas ----------
+
+class InventoryUpdateItem(BaseModel):
+    """Update item for unified inventory endpoint (works for products and variants)"""
+    seller_sku: str  # SKU of product or variant
+    stock: int
+    is_in_stock: Optional[bool] = None  # Auto-calculated if not provided
+
+
+class InventoryUnifiedUpdate(BaseModel):
+    """Unified bulk update for products and variants"""
+    items: List[InventoryUpdateItem]
+
+
+class InventoryUnifiedUpdateResult(BaseModel):
+    """Result for a single item update"""
+    seller_sku: str
+    id: int
+    name: str
+    stock: int
+    is_in_stock: bool
+    is_variant: bool
+    parent_sku: Optional[str] = None
+    message: str
+
+
+class InventoryUnifiedUpdateError(BaseModel):
+    """Error for a single item"""
+    seller_sku: str
+    error: str
+
+
+class InventoryUnifiedUpdateResponse(BaseModel):
+    """Response for unified inventory update"""
+    updated: int
+    failed: int
+    errors: List[InventoryUnifiedUpdateError] = []
+    results: List[InventoryUnifiedUpdateResult] = []

@@ -148,3 +148,17 @@ class ProductSchema(BaseProduct):
 
     class Config:
         from_attributes = True
+
+
+# ---------- Favorite Schemas ----------
+
+class ToggleFavoriteResponse(BaseModel):
+    """Response when toggling a product favorite"""
+    product_id: int
+    is_favorite: bool
+    message: str
+
+
+class FavoriteIdsResponse(BaseModel):
+    """List of product IDs that are favorites"""
+    product_ids: List[int]

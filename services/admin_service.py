@@ -31,7 +31,14 @@ from schemas.admin import (
     UserSuspendRequest, UserBlockRequest, UserActionResponse,
     CategoryInput, CategoryResponse, CategoryGroupResponse, CategoryItemResponse,
     ShippingRuleCreate, ShippingRuleUpdate, ShippingRuleResponse,
-    ShippingRulesSyncRequest, ShippingRulesSyncResponse
+    ShippingRulesSyncRequest, ShippingRulesSyncResponse,
+    InventoryUpdateSingle, InventoryBulkUpdate, InventoryUpdateResponse,
+    InventoryBulkUpdateResponse, InventoryBulkUpdateError,
+    VariantInventoryUpdateSingle, VariantInventoryBulkUpdate,
+    VariantInventoryUpdateResponse, VariantInventoryBulkUpdateResponse, VariantInventoryBulkUpdateError,
+    InventoryItem, InventoryListResponse,
+    InventoryUnifiedUpdate, InventoryUnifiedUpdateResponse,
+    InventoryUnifiedUpdateResult, InventoryUnifiedUpdateError
 )
 from config import SECRET_KEY, ALGORITHM, WHOLESALE_FRONTEND_URL, SINGLE_ACCESS_TOKEN_EXPIRE_HOURS
 
@@ -422,11 +429,18 @@ def list_categories(db: Session) -> List[CategoryGroupResponse]:
 # ---------- Product Management ----------
 
 def create_product(data: ProductCreate, db: Session) -> ProductAdminResponse:
-    """Create a new product with optional variant groups and categories"""
+    """Create a new product with optional variant groups and categories.
+    Products are created with stock=0 and is_in_stock=False.
+    Use inventory endpoints to update stock."""
     # Extract variant groups and categories before creating product
     variant_groups_data = data.variant_groups
     categories_data = data.categories
     product_data = data.model_dump(exclude={'variant_groups', 'categories'})
+    
+    # Force stock=0 and is_in_stock=False for new products
+    # Stock is managed via inventory endpoints
+    product_data['stock'] = 0
+    product_data['is_in_stock'] = False
     
     # If variant groups provided, set has_variants to True
     if variant_groups_data:
@@ -1844,4 +1858,521 @@ def delete_shipping_rule(rule_id: int, db: Session) -> dict:
     db.commit()
     
     return {"msg": f"Shipping rule '{rule_name}' deleted successfully"}
+
+
+# ---------- Inventory Management ----------
+
+def _get_variant_inventory_list(product: Product) -> list:
+    """Get list of variants with their current inventory"""
+    variants = []
+    for group in product.variant_groups:
+        for variant in group.variants:
+            if getattr(variant, 'active', True):
+                variants.append({
+                    "variant_id": variant.id,
+                    "seller_sku": variant.seller_sku,
+                    "name": variant.name,
+                    "group_name": group.name or group.variant_type,
+                    "stock": variant.stock or 0,
+                    "is_in_stock": variant.is_in_stock
+                })
+    return variants
+
+
+def update_inventory_by_sku(
+    seller_sku: str, 
+    data: InventoryUpdateSingle, 
+    db: Session
+) -> InventoryUpdateResponse:
+    """Update inventory for a single product by SKU (only for products WITHOUT variants)"""
+    product = db.query(Product).filter(Product.seller_sku == seller_sku).first()
+    if not product:
+        raise HTTPException(status_code=404, detail=f"Product with SKU '{seller_sku}' not found")
+    
+    # Reject if product has variants - return list of variants with their stock
+    if product.has_variants:
+        variants = _get_variant_inventory_list(product)
+        raise HTTPException(
+            status_code=400, 
+            detail={
+                "error": "Product has variants",
+                "message": f"Product '{seller_sku}' has variants. Use /admin/inventory/variants/bulk to update variant stock. "
+                          f"Product stock is automatically calculated as the sum of all variant stocks.",
+                "product_id": product.id,
+                "product_name": product.name,
+                "product_stock": product.stock,
+                "product_is_in_stock": product.is_in_stock,
+                "variants": variants,
+                "hint": "Update the variants listed above using /admin/inventory/variants/bulk"
+            }
+        )
+    
+    product.stock = data.stock
+    
+    # Auto-calculate is_in_stock if not provided
+    if data.is_in_stock is not None:
+        product.is_in_stock = data.is_in_stock
+    else:
+        product.is_in_stock = data.stock > 0
+    
+    product.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(product)
+    
+    return InventoryUpdateResponse(
+        seller_sku=product.seller_sku,
+        product_id=product.id,
+        stock=product.stock,
+        is_in_stock=product.is_in_stock,
+        message="Inventory updated successfully"
+    )
+
+
+def update_inventory_by_id(
+    product_id: int, 
+    data: InventoryUpdateSingle, 
+    db: Session
+) -> InventoryUpdateResponse:
+    """Update inventory for a single product by ID (only for products WITHOUT variants)"""
+    product = db.query(Product).filter(Product.id == product_id).first()
+    if not product:
+        raise HTTPException(status_code=404, detail=f"Product with ID {product_id} not found")
+    
+    # Reject if product has variants - return list of variants with their stock
+    if product.has_variants:
+        variants = _get_variant_inventory_list(product)
+        raise HTTPException(
+            status_code=400, 
+            detail={
+                "error": "Product has variants",
+                "message": f"Product ID {product_id} has variants. Use /admin/inventory/variants/bulk to update variant stock. "
+                          f"Product stock is automatically calculated as the sum of all variant stocks.",
+                "product_id": product.id,
+                "product_sku": product.seller_sku,
+                "product_name": product.name,
+                "product_stock": product.stock,
+                "product_is_in_stock": product.is_in_stock,
+                "variants": variants,
+                "hint": "Update the variants listed above using /admin/inventory/variants/bulk"
+            }
+        )
+    
+    product.stock = data.stock
+    
+    # Auto-calculate is_in_stock if not provided
+    if data.is_in_stock is not None:
+        product.is_in_stock = data.is_in_stock
+    else:
+        product.is_in_stock = data.stock > 0
+    
+    product.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(product)
+    
+    return InventoryUpdateResponse(
+        seller_sku=product.seller_sku or "",
+        product_id=product.id,
+        stock=product.stock,
+        is_in_stock=product.is_in_stock,
+        message="Inventory updated successfully"
+    )
+
+
+def bulk_update_inventory(
+    data: InventoryBulkUpdate, 
+    db: Session
+) -> InventoryBulkUpdateResponse:
+    """Update inventory for multiple products at once by SKU (only for products WITHOUT variants)"""
+    results = []
+    errors = []
+    
+    for item in data.products:
+        product = db.query(Product).filter(Product.seller_sku == item.seller_sku).first()
+        
+        if not product:
+            errors.append(InventoryBulkUpdateError(
+                seller_sku=item.seller_sku,
+                error="Product not found"
+            ))
+            continue
+        
+        # Skip products with variants - they must use variant endpoints
+        if product.has_variants:
+            variants = _get_variant_inventory_list(product)
+            variant_skus = [v["seller_sku"] for v in variants if v["seller_sku"]]
+            errors.append(InventoryBulkUpdateError(
+                seller_sku=item.seller_sku,
+                error=f"Product has variants. Use /admin/inventory/variants/bulk with SKUs: {', '.join(variant_skus)}"
+            ))
+            continue
+        
+        try:
+            product.stock = item.stock
+            
+            # Auto-calculate is_in_stock if not provided
+            if item.is_in_stock is not None:
+                product.is_in_stock = item.is_in_stock
+            else:
+                product.is_in_stock = item.stock > 0
+            
+            product.updated_at = datetime.utcnow()
+            db.flush()
+            
+            results.append(InventoryUpdateResponse(
+                seller_sku=product.seller_sku,
+                product_id=product.id,
+                stock=product.stock,
+                is_in_stock=product.is_in_stock,
+                message="Updated"
+            ))
+        except Exception as e:
+            errors.append(InventoryBulkUpdateError(
+                seller_sku=item.seller_sku,
+                error=str(e)
+            ))
+    
+    db.commit()
+    
+    return InventoryBulkUpdateResponse(
+        updated=len(results),
+        failed=len(errors),
+        errors=errors,
+        results=results
+    )
+
+
+# ---------- Variant Inventory Management ----------
+
+def _recalculate_product_stock(product: Product, db: Session) -> None:
+    """
+    Recalculate product stock based on sum of all variant stocks.
+    Product is_in_stock = true if any variant is in stock.
+    """
+    if not product.has_variants:
+        return
+    
+    total_stock = 0
+    any_in_stock = False
+    
+    for group in product.variant_groups:
+        for variant in group.variants:
+            if getattr(variant, 'active', True):  # Only count active variants
+                total_stock += variant.stock or 0
+                if variant.is_in_stock:
+                    any_in_stock = True
+    
+    product.stock = total_stock
+    product.is_in_stock = any_in_stock
+    product.updated_at = datetime.utcnow()
+
+
+def update_variant_inventory_by_sku(
+    seller_sku: str, 
+    data: VariantInventoryUpdateSingle, 
+    db: Session
+) -> VariantInventoryUpdateResponse:
+    """Update inventory for a single variant by SKU"""
+    variant = db.query(ProductVariant).filter(ProductVariant.seller_sku == seller_sku).first()
+    if not variant:
+        raise HTTPException(status_code=404, detail=f"Variant with SKU '{seller_sku}' not found")
+    
+    variant.stock = data.stock
+    
+    # Auto-calculate is_in_stock if not provided
+    if data.is_in_stock is not None:
+        variant.is_in_stock = data.is_in_stock
+    else:
+        variant.is_in_stock = data.stock > 0
+    
+    # Get product info and recalculate parent product stock
+    group = db.query(ProductVariantGroup).filter(ProductVariantGroup.id == variant.group_id).first()
+    product = db.query(Product).filter(Product.id == group.product_id).first() if group else None
+    
+    # Recalculate parent product stock
+    if product:
+        _recalculate_product_stock(product, db)
+    
+    db.commit()
+    db.refresh(variant)
+    
+    return VariantInventoryUpdateResponse(
+        variant_id=variant.id,
+        seller_sku=variant.seller_sku,
+        variant_name=variant.name,
+        product_id=product.id if product else 0,
+        product_name=product.name if product else "Unknown",
+        stock=variant.stock,
+        is_in_stock=variant.is_in_stock,
+        message="Variant inventory updated successfully"
+    )
+
+
+def update_variant_inventory_by_id(
+    variant_id: int, 
+    data: VariantInventoryUpdateSingle, 
+    db: Session
+) -> VariantInventoryUpdateResponse:
+    """Update inventory for a single variant by ID"""
+    variant = db.query(ProductVariant).filter(ProductVariant.id == variant_id).first()
+    if not variant:
+        raise HTTPException(status_code=404, detail=f"Variant with ID {variant_id} not found")
+    
+    variant.stock = data.stock
+    
+    # Auto-calculate is_in_stock if not provided
+    if data.is_in_stock is not None:
+        variant.is_in_stock = data.is_in_stock
+    else:
+        variant.is_in_stock = data.stock > 0
+    
+    # Get product info and recalculate parent product stock
+    group = db.query(ProductVariantGroup).filter(ProductVariantGroup.id == variant.group_id).first()
+    product = db.query(Product).filter(Product.id == group.product_id).first() if group else None
+    
+    # Recalculate parent product stock
+    if product:
+        _recalculate_product_stock(product, db)
+    
+    db.commit()
+    db.refresh(variant)
+    
+    return VariantInventoryUpdateResponse(
+        variant_id=variant.id,
+        seller_sku=variant.seller_sku or "",
+        variant_name=variant.name,
+        product_id=product.id if product else 0,
+        product_name=product.name if product else "Unknown",
+        stock=variant.stock,
+        is_in_stock=variant.is_in_stock,
+        message="Variant inventory updated successfully"
+    )
+
+
+def bulk_update_variant_inventory(
+    data: VariantInventoryBulkUpdate, 
+    db: Session
+) -> VariantInventoryBulkUpdateResponse:
+    """Update inventory for multiple variants at once by SKU"""
+    results = []
+    errors = []
+    affected_products = set()  # Track products that need stock recalculation
+    
+    for item in data.variants:
+        variant = db.query(ProductVariant).filter(ProductVariant.seller_sku == item.seller_sku).first()
+        
+        if not variant:
+            errors.append(VariantInventoryBulkUpdateError(
+                seller_sku=item.seller_sku,
+                error="Variant not found"
+            ))
+            continue
+        
+        try:
+            variant.stock = item.stock
+            
+            # Auto-calculate is_in_stock if not provided
+            if item.is_in_stock is not None:
+                variant.is_in_stock = item.is_in_stock
+            else:
+                variant.is_in_stock = item.stock > 0
+            
+            # Get product info
+            group = db.query(ProductVariantGroup).filter(ProductVariantGroup.id == variant.group_id).first()
+            product = db.query(Product).filter(Product.id == group.product_id).first() if group else None
+            
+            if product:
+                affected_products.add(product.id)
+            
+            db.flush()
+            
+            results.append(VariantInventoryUpdateResponse(
+                variant_id=variant.id,
+                seller_sku=variant.seller_sku or "",
+                variant_name=variant.name,
+                product_id=product.id if product else 0,
+                product_name=product.name if product else "Unknown",
+                stock=variant.stock,
+                is_in_stock=variant.is_in_stock,
+                message="Updated"
+            ))
+        except Exception as e:
+            errors.append(VariantInventoryBulkUpdateError(
+                seller_sku=item.seller_sku,
+                error=str(e)
+            ))
+    
+    # Recalculate stock for all affected products
+    for product_id in affected_products:
+        product = db.query(Product).filter(Product.id == product_id).first()
+        if product:
+            _recalculate_product_stock(product, db)
+    
+    db.commit()
+    
+    return VariantInventoryBulkUpdateResponse(
+        updated=len(results),
+        failed=len(errors),
+        errors=errors,
+        results=results
+    )
+
+
+# ---------- Unified Inventory (Flat List) ----------
+
+def get_inventory_list(db: Session, search: Optional[str] = None) -> InventoryListResponse:
+    """
+    Get flat list of all inventory items (products without variants + all variants).
+    Products with variants are NOT included as items - only their variants are.
+    """
+    items = []
+    total_products = 0
+    total_variants = 0
+    
+    # Get all products
+    query = db.query(Product)
+    
+    if search:
+        search_filter = f"%{search}%"
+        query = query.filter(
+            (Product.name.ilike(search_filter)) |
+            (Product.seller_sku.ilike(search_filter)) |
+            (Product.brand.ilike(search_filter))
+        )
+    
+    products = query.order_by(Product.name).all()
+    
+    for product in products:
+        if not product.has_variants:
+            # Simple product - add directly
+            items.append(InventoryItem(
+                id=product.id,
+                seller_sku=product.seller_sku,
+                name=product.name,
+                stock=product.stock or 0,
+                is_in_stock=product.is_in_stock or False,
+                is_variant=False,
+                image_url=product.image_url
+            ))
+            total_products += 1
+        else:
+            # Product with variants - add each variant
+            for group in product.variant_groups:
+                for variant in group.variants:
+                    if getattr(variant, 'active', True):
+                        items.append(InventoryItem(
+                            id=variant.id,
+                            seller_sku=variant.seller_sku,
+                            name=variant.name,
+                            stock=variant.stock or 0,
+                            is_in_stock=variant.is_in_stock or False,
+                            is_variant=True,
+                            image_url=variant.image_url or product.image_url,
+                            parent_id=product.id,
+                            parent_sku=product.seller_sku,
+                            parent_name=product.name,
+                            variant_type=group.variant_type,
+                            group_name=group.name
+                        ))
+                        total_variants += 1
+    
+    return InventoryListResponse(
+        total_items=len(items),
+        total_products=total_products,
+        total_variants=total_variants,
+        items=items
+    )
+
+
+def update_inventory_unified(
+    data: InventoryUnifiedUpdate, 
+    db: Session
+) -> InventoryUnifiedUpdateResponse:
+    """
+    Update inventory for products and variants in a unified way.
+    Automatically detects if SKU belongs to a product or variant.
+    """
+    results = []
+    errors = []
+    affected_products = set()
+    
+    for item in data.items:
+        # First try to find as a product
+        product = db.query(Product).filter(Product.seller_sku == item.seller_sku).first()
+        
+        if product:
+            # It's a product
+            if product.has_variants:
+                # Can't update product with variants directly
+                errors.append(InventoryUnifiedUpdateError(
+                    seller_sku=item.seller_sku,
+                    error="This is a product with variants. Update the variant SKUs instead."
+                ))
+                continue
+            
+            # Update simple product
+            product.stock = item.stock
+            product.is_in_stock = item.is_in_stock if item.is_in_stock is not None else item.stock > 0
+            product.updated_at = datetime.utcnow()
+            db.flush()
+            
+            results.append(InventoryUnifiedUpdateResult(
+                seller_sku=item.seller_sku,
+                id=product.id,
+                name=product.name,
+                stock=product.stock,
+                is_in_stock=product.is_in_stock,
+                is_variant=False,
+                message="Updated"
+            ))
+            continue
+        
+        # Try to find as a variant
+        variant = db.query(ProductVariant).filter(ProductVariant.seller_sku == item.seller_sku).first()
+        
+        if variant:
+            # It's a variant
+            variant.stock = item.stock
+            variant.is_in_stock = item.is_in_stock if item.is_in_stock is not None else item.stock > 0
+            
+            # Get parent product
+            group = db.query(ProductVariantGroup).filter(ProductVariantGroup.id == variant.group_id).first()
+            parent = db.query(Product).filter(Product.id == group.product_id).first() if group else None
+            
+            if parent:
+                affected_products.add(parent.id)
+            
+            db.flush()
+            
+            results.append(InventoryUnifiedUpdateResult(
+                seller_sku=item.seller_sku,
+                id=variant.id,
+                name=variant.name,
+                stock=variant.stock,
+                is_in_stock=variant.is_in_stock,
+                is_variant=True,
+                parent_sku=parent.seller_sku if parent else None,
+                message="Updated"
+            ))
+            continue
+        
+        # Not found
+        errors.append(InventoryUnifiedUpdateError(
+            seller_sku=item.seller_sku,
+            error="SKU not found (not a product or variant)"
+        ))
+    
+    # Recalculate stock for affected parent products
+    for product_id in affected_products:
+        product = db.query(Product).filter(Product.id == product_id).first()
+        if product:
+            _recalculate_product_stock(product, db)
+    
+    db.commit()
+    
+    return InventoryUnifiedUpdateResponse(
+        updated=len(results),
+        failed=len(errors),
+        errors=errors,
+        results=results
+    )
 

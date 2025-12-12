@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import or_
 from fastapi import HTTPException
 
-from models import Product, CategoryGroup, Category, ProductCategory
+from models import Product, CategoryGroup, Category, ProductCategory, UserFavorite, User
 from schemas.product import (
     ProductPublic, 
     ProductVariantPublic, 
@@ -310,3 +310,99 @@ def get_brands(db: Session) -> List[str]:
     """Get list of unique brands"""
     brands = db.query(Product.brand).distinct().filter(Product.brand.isnot(None)).all()
     return sorted([b[0] for b in brands if b[0]])
+
+
+# ---------- User Favorites ----------
+
+def toggle_favorite(db: Session, user: User, product_id: int) -> dict:
+    """Toggle a product as favorite for a user. Returns new favorite status."""
+    # Check product exists
+    product = db.query(Product).filter(Product.id == product_id).first()
+    if not product:
+        raise HTTPException(status_code=404, detail="Product not found")
+    
+    # Check if already a favorite
+    existing = db.query(UserFavorite).filter(
+        UserFavorite.user_id == user.id,
+        UserFavorite.product_id == product_id
+    ).first()
+    
+    if existing:
+        # Remove from favorites
+        db.delete(existing)
+        db.commit()
+        return {
+            "product_id": product_id,
+            "is_favorite": False,
+            "message": "Product removed from favorites"
+        }
+    else:
+        # Add to favorites
+        favorite = UserFavorite(
+            user_id=user.id,
+            product_id=product_id
+        )
+        db.add(favorite)
+        db.commit()
+        return {
+            "product_id": product_id,
+            "is_favorite": True,
+            "message": "Product added to favorites"
+        }
+
+
+def get_user_favorites(
+    db: Session, 
+    user: User, 
+    lang: str = "es",
+    page: int = 1,
+    page_size: int = 20
+) -> PaginatedProductResponse:
+    """Get paginated list of user's favorite products"""
+    # Get favorite product IDs
+    favorites_query = db.query(UserFavorite.product_id).filter(
+        UserFavorite.user_id == user.id
+    )
+    
+    # Get total count
+    total_items = favorites_query.count()
+    total_pages = (total_items + page_size - 1) // page_size
+    
+    # Get paginated favorites ordered by when they were added
+    offset = (page - 1) * page_size
+    favorites = db.query(UserFavorite).filter(
+        UserFavorite.user_id == user.id
+    ).order_by(UserFavorite.created_at.desc()).offset(offset).limit(page_size).all()
+    
+    # Get the products
+    product_ids = [f.product_id for f in favorites]
+    products = db.query(Product).filter(Product.id.in_(product_ids)).all()
+    
+    # Create lookup and maintain order
+    products_by_id = {p.id: p for p in products}
+    ordered_products = [products_by_id[pid] for pid in product_ids if pid in products_by_id]
+    
+    return PaginatedProductResponse(
+        page=page,
+        page_size=page_size,
+        total_items=total_items,
+        total_pages=total_pages,
+        sorted_by="added_date",
+        results=[_product_to_public(p, lang, db) for p in ordered_products]
+    )
+
+
+def is_product_favorite(db: Session, user: User, product_id: int) -> bool:
+    """Check if a product is in user's favorites"""
+    return db.query(UserFavorite).filter(
+        UserFavorite.user_id == user.id,
+        UserFavorite.product_id == product_id
+    ).first() is not None
+
+
+def get_user_favorite_ids(db: Session, user: User) -> List[int]:
+    """Get list of product IDs that are favorites for the user"""
+    favorites = db.query(UserFavorite.product_id).filter(
+        UserFavorite.user_id == user.id
+    ).all()
+    return [f[0] for f in favorites]

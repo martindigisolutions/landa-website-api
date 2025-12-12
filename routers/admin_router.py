@@ -20,7 +20,12 @@ from schemas.admin import (
     UserSuspendRequest, UserBlockRequest, UserActionResponse,
     CategoryGroupResponse,
     ShippingRuleCreate, ShippingRuleUpdate, ShippingRuleResponse,
-    ShippingRulesSyncRequest, ShippingRulesSyncResponse
+    ShippingRulesSyncRequest, ShippingRulesSyncResponse,
+    InventoryUpdateSingle, InventoryBulkUpdate, 
+    InventoryUpdateResponse, InventoryBulkUpdateResponse,
+    VariantInventoryUpdateSingle, VariantInventoryBulkUpdate,
+    VariantInventoryUpdateResponse, VariantInventoryBulkUpdateResponse,
+    InventoryListResponse, InventoryUnifiedUpdate, InventoryUnifiedUpdateResponse
 )
 from schemas.product import ProductSchema
 
@@ -637,4 +642,183 @@ def delete_shipping_rule(
     db: Session = Depends(get_db)
 ):
     return admin_service.delete_shipping_rule(rule_id, db)
+
+
+# ==================== INVENTORY MANAGEMENT ====================
+# These endpoints require inventory:write scope (or products:write as fallback)
+
+@router.put(
+    "/inventory/sku/{seller_sku}",
+    response_model=InventoryUpdateResponse,
+    summary="Update inventory by SKU",
+    description="""Update stock quantity for a single product by its SKU.
+    
+    If `is_in_stock` is not provided, it will be automatically set based on stock > 0.
+    """
+)
+def update_inventory_by_sku(
+    seller_sku: str,
+    data: InventoryUpdateSingle,
+    app=Depends(admin_service.require_scope("products:write")),
+    db: Session = Depends(get_db)
+):
+    return admin_service.update_inventory_by_sku(seller_sku, data, db)
+
+
+@router.put(
+    "/inventory/product/{product_id}",
+    response_model=InventoryUpdateResponse,
+    summary="Update inventory by product ID",
+    description="""Update stock quantity for a single product by its ID.
+    
+    If `is_in_stock` is not provided, it will be automatically set based on stock > 0.
+    """
+)
+def update_inventory_by_id(
+    product_id: int,
+    data: InventoryUpdateSingle,
+    app=Depends(admin_service.require_scope("products:write")),
+    db: Session = Depends(get_db)
+):
+    return admin_service.update_inventory_by_id(product_id, data, db)
+
+
+@router.put(
+    "/inventory/bulk",
+    response_model=InventoryBulkUpdateResponse,
+    summary="Bulk update inventory",
+    description="""Update stock quantities for multiple products at once.
+    
+    Products are identified by their `seller_sku`.
+    If `is_in_stock` is not provided for an item, it will be automatically set based on stock > 0.
+    
+    Returns the count of successfully updated products and any errors.
+    """
+)
+def bulk_update_inventory(
+    data: InventoryBulkUpdate,
+    app=Depends(admin_service.require_scope("products:write")),
+    db: Session = Depends(get_db)
+):
+    return admin_service.bulk_update_inventory(data, db)
+
+
+# ==================== VARIANT INVENTORY MANAGEMENT ====================
+# For products with variants, each variant has its own stock
+
+@router.put(
+    "/inventory/variant/sku/{seller_sku}",
+    response_model=VariantInventoryUpdateResponse,
+    summary="Update variant inventory by SKU",
+    description="""Update stock quantity for a single product variant by its SKU.
+    
+    Use this for products with variants (colors, sizes, etc.) where each variant has its own stock.
+    If `is_in_stock` is not provided, it will be automatically set based on stock > 0.
+    """
+)
+def update_variant_inventory_by_sku(
+    seller_sku: str,
+    data: VariantInventoryUpdateSingle,
+    app=Depends(admin_service.require_scope("products:write")),
+    db: Session = Depends(get_db)
+):
+    return admin_service.update_variant_inventory_by_sku(seller_sku, data, db)
+
+
+@router.put(
+    "/inventory/variant/{variant_id}",
+    response_model=VariantInventoryUpdateResponse,
+    summary="Update variant inventory by ID",
+    description="""Update stock quantity for a single product variant by its ID.
+    
+    If `is_in_stock` is not provided, it will be automatically set based on stock > 0.
+    """
+)
+def update_variant_inventory_by_id(
+    variant_id: int,
+    data: VariantInventoryUpdateSingle,
+    app=Depends(admin_service.require_scope("products:write")),
+    db: Session = Depends(get_db)
+):
+    return admin_service.update_variant_inventory_by_id(variant_id, data, db)
+
+
+@router.put(
+    "/inventory/variants/bulk",
+    response_model=VariantInventoryBulkUpdateResponse,
+    summary="Bulk update variant inventory",
+    description="""Update stock quantities for multiple product variants at once.
+    
+    Variants are identified by their `seller_sku`.
+    If `is_in_stock` is not provided for an item, it will be automatically set based on stock > 0.
+    
+    Returns the count of successfully updated variants and any errors.
+    """
+)
+def bulk_update_variant_inventory(
+    data: VariantInventoryBulkUpdate,
+    app=Depends(admin_service.require_scope("products:write")),
+    db: Session = Depends(get_db)
+):
+    return admin_service.bulk_update_variant_inventory(data, db)
+
+
+# ==================== UNIFIED INVENTORY (FLAT LIST) ====================
+# Simplified endpoints that handle both products and variants uniformly
+
+@router.get(
+    "/inventory",
+    response_model=InventoryListResponse,
+    summary="Get all inventory items (flat list)",
+    description="""
+    Returns a flat list of all inventory items:
+    - Simple products (without variants)
+    - Individual variants (for products with variants)
+    
+    Products with variants are NOT included - only their variants are listed.
+    Each item has `is_variant` to indicate if it's a variant or simple product.
+    
+    Use the `search` parameter to filter by name, SKU, or brand.
+    """
+)
+def get_inventory_list(
+    search: Optional[str] = Query(None, description="Search by name, SKU, or brand"),
+    app=Depends(admin_service.require_scope("products:read")),
+    db: Session = Depends(get_db)
+):
+    return admin_service.get_inventory_list(db, search)
+
+
+@router.put(
+    "/inventory",
+    response_model=InventoryUnifiedUpdateResponse,
+    summary="Update inventory (unified)",
+    description="""
+    Update inventory for products and variants using a single endpoint.
+    
+    Send a list of SKUs with their new stock values. The system automatically
+    detects if each SKU belongs to a simple product or a variant.
+    
+    **Important:**
+    - For products with variants, you must update the variant SKUs (not the parent product SKU)
+    - Parent product stock is automatically recalculated from its variants
+    
+    **Example:**
+    ```json
+    {
+      "items": [
+        {"seller_sku": "PROD-SIMPLE-001", "stock": 50},
+        {"seller_sku": "TINTE-001-RUBIO", "stock": 25},
+        {"seller_sku": "TINTE-001-NEGRO", "stock": 30}
+      ]
+    }
+    ```
+    """
+)
+def update_inventory_unified(
+    data: InventoryUnifiedUpdate,
+    app=Depends(admin_service.require_scope("products:write")),
+    db: Session = Depends(get_db)
+):
+    return admin_service.update_inventory_unified(data, db)
 

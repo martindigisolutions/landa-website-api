@@ -262,6 +262,20 @@ class ProductCategory(Base):
 
 # ==================== SHIPPING RULE MODELS ====================
 
+class UserFavorite(Base):
+    """User's favorite products"""
+    __tablename__ = "user_favorites"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    product_id = Column(Integer, ForeignKey("products.id", ondelete="CASCADE"), nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    # Relationships
+    user = relationship("User", backref="favorites")
+    product = relationship("Product")
+
+
 class ShippingRule(Base):
     """
     Shipping rules for calculating shipping costs and free weight thresholds.

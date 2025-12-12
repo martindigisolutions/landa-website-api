@@ -2,7 +2,13 @@ from fastapi import APIRouter, Depends, Query, Header
 from sqlalchemy.orm import Session
 from typing import Optional, List
 
-from schemas.product import ProductPublic, PaginatedProductResponse, CategoryGroupPublic
+from schemas.product import (
+    ProductPublic, 
+    PaginatedProductResponse, 
+    CategoryGroupPublic,
+    ToggleFavoriteResponse,
+    FavoriteIdsResponse
+)
 from models import User
 from database import get_db
 from services import product_service, auth_service
@@ -112,3 +118,79 @@ def get_brands(
     db: Session = Depends(get_db)
 ):
     return product_service.get_brands(db)
+
+
+# ==================== FAVORITES ====================
+
+@router.post(
+    "/products/{product_id}/favorite",
+    summary="Toggle product favorite",
+    description="""
+    Toggle a product as favorite for the authenticated user.
+    - If the product is not a favorite, it will be added to favorites.
+    - If the product is already a favorite, it will be removed from favorites.
+    
+    Returns the new favorite status.
+    """,
+    response_model=ToggleFavoriteResponse
+)
+def toggle_favorite(
+    product_id: int,
+    current_user: User = Depends(auth_service.get_current_user),
+    db: Session = Depends(get_db)
+):
+    return product_service.toggle_favorite(db, current_user, product_id)
+
+
+@router.get(
+    "/favorites",
+    summary="Get user's favorite products",
+    description="""
+    Returns a paginated list of the authenticated user's favorite products.
+    Products are ordered by when they were added to favorites (newest first).
+    
+    **Localization:** Send `Accept-Language: en` header for English, 
+    or `Accept-Language: es` for Spanish (default).
+    """,
+    response_model=PaginatedProductResponse
+)
+def get_favorites(
+    current_user: User = Depends(auth_service.get_current_user),
+    db: Session = Depends(get_db),
+    accept_language: Optional[str] = Header(None, alias="Accept-Language"),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100)
+):
+    lang = get_language_from_header(accept_language)
+    return product_service.get_user_favorites(db, current_user, lang, page, page_size)
+
+
+@router.get(
+    "/favorites/ids",
+    summary="Get IDs of user's favorite products",
+    description="""
+    Returns a list of product IDs that are favorites for the authenticated user.
+    Useful for quickly checking which products are favorites without loading full product data.
+    """,
+    response_model=FavoriteIdsResponse
+)
+def get_favorite_ids(
+    current_user: User = Depends(auth_service.get_current_user),
+    db: Session = Depends(get_db)
+):
+    ids = product_service.get_user_favorite_ids(db, current_user)
+    return FavoriteIdsResponse(product_ids=ids)
+
+
+@router.get(
+    "/products/{product_id}/is-favorite",
+    summary="Check if product is favorite",
+    description="Check if a specific product is in the authenticated user's favorites.",
+)
+def check_is_favorite(
+    product_id: int,
+    current_user: User = Depends(auth_service.get_current_user),
+    db: Session = Depends(get_db)
+):
+    is_fav = product_service.is_product_favorite(db, current_user, product_id)
+    return {"product_id": product_id, "is_favorite": is_fav}
