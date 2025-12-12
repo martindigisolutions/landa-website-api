@@ -59,7 +59,7 @@ def get_products(
     db: Session = Depends(get_db),
     accept_language: Optional[str] = Header(None, alias="Accept-Language"),
     search: Optional[str] = Query(None, description="Search by name, title, tags, or brand"),
-    brand: Optional[str] = Query(None, description="Filter by brand"),
+    brand: Optional[List[str]] = Query(None, description="Filter by brand(s). Can be repeated for multiple brands."),
     is_in_stock: Optional[bool] = Query(None, description="Filter by availability"),
     min_price: Optional[float] = Query(None, description="Minimum price filter"),
     max_price: Optional[float] = Query(None, description="Maximum price filter"),

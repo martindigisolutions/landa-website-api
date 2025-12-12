@@ -216,7 +216,7 @@ def get_products(
     db: Session,
     lang: str = "es",
     search: Optional[str] = None,
-    brand: Optional[str] = None,
+    brand: Optional[List[str]] = None,
     is_in_stock: Optional[bool] = None,
     min_price: Optional[float] = None,
     max_price: Optional[float] = None,
@@ -243,7 +243,7 @@ def get_products(
         )
     
     if brand:
-        query = query.filter(Product.brand == brand)
+        query = query.filter(Product.brand.in_(brand))
     
     if is_in_stock is not None:
         query = query.filter(Product.is_in_stock == is_in_stock)
