@@ -1,11 +1,45 @@
 import os
+import sys
+import traceback
 from contextlib import asynccontextmanager
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
-from routers import auth, products, checkout_router, stripe_router, oauth_router, admin_router
-from database import Base, engine, SessionLocal
-from mangum import Mangum
-from config import ADMIN_CLIENT_ID, ADMIN_CLIENT_SECRET
+
+print("🚀 Starting Landa Beauty Supply API...")
+print(f"Python version: {sys.version}")
+print(f"DATABASE_URL set: {bool(os.getenv('DATABASE_URL'))}")
+
+try:
+    from fastapi import FastAPI
+    from fastapi.middleware.cors import CORSMiddleware
+    print("✅ FastAPI imported")
+except Exception as e:
+    print(f"❌ Error importing FastAPI: {e}")
+    traceback.print_exc()
+    raise
+
+try:
+    from routers import auth, products, checkout_router, stripe_router, oauth_router, admin_router
+    print("✅ Routers imported")
+except Exception as e:
+    print(f"❌ Error importing routers: {e}")
+    traceback.print_exc()
+    raise
+
+try:
+    from database import Base, engine, SessionLocal
+    print("✅ Database imported")
+except Exception as e:
+    print(f"❌ Error importing database: {e}")
+    traceback.print_exc()
+    raise
+
+try:
+    from mangum import Mangum
+    from config import ADMIN_CLIENT_ID, ADMIN_CLIENT_SECRET
+    print("✅ Config imported")
+except Exception as e:
+    print(f"❌ Error importing config: {e}")
+    traceback.print_exc()
+    raise
 
 
 def init_admin_app():
