@@ -1,5 +1,5 @@
 fastapi
-uvicorn
+uvicorn[standard]
 sqlalchemy
 python-jose[cryptography]
 passlib[bcrypt]
@@ -10,3 +10,5 @@ alembic
 pydantic[email]
 python-dotenv
 stripe
+psycopg2-binary
+aiosqlite

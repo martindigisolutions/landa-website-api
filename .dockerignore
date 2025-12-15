@@ -1,0 +1,50 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg
+*.egg-info/
+.eggs/
+*.manifest
+*.spec
+
+# Virtual environments
+venv/
+env/
+.env
+.env.*
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Git
+.git/
+.gitignore
+
+# SQLite databases (use external DB in production)
+*.sqlite3
+*.db
+
+# Alembic
+alembic/__pycache__/
+alembic/versions/__pycache__/
+
+# Docs
+docs/
+*.md
+
+# Tests
+tests/
+test_*.py
+*_test.py
+
+# Other
+.DS_Store
+Thumbs.db
+*.log
+
