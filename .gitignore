@@ -19,6 +19,7 @@ staticfiles/
 static/product/images/
 # Virtual environment
 .venv/
+.venv2/
 venv/
 env/
 .env
