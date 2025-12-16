@@ -17,7 +17,7 @@ except Exception as e:
     raise
 
 try:
-    from routers import auth, products, checkout_router, stripe_router, oauth_router, admin_router
+    from routers import auth, products, checkout_router, stripe_router, oauth_router, admin_router, cart_router
     print("✅ Routers imported")
 except Exception as e:
     print(f"❌ Error importing routers: {e}")
@@ -156,6 +156,7 @@ app.include_router(checkout_router.router)
 app.include_router(stripe_router.router)
 app.include_router(oauth_router.router)
 app.include_router(admin_router.router)
+app.include_router(cart_router.router)
 
 # Lambda handler
 handler = Mangum(app)

@@ -330,3 +330,47 @@ class ShippingRule(Base):
     # Timestamps
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+# ==================== CART MODELS ====================
+
+class Cart(Base):
+    """
+    Shopping cart for users (authenticated) and guests (session-based).
+    - Authenticated users: identified by user_id
+    - Guests: identified by session_id (sent from frontend)
+    """
+    __tablename__ = "carts"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True)
+    session_id = Column(String, nullable=True, index=True)  # For guest users
+    
+    # Timestamps
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    expires_at = Column(DateTime, nullable=True)  # For automatic cleanup
+    
+    # Relationships
+    user = relationship("User", backref="cart")
+    items = relationship("CartItem", back_populates="cart", cascade="all, delete-orphan")
+
+
+class CartItem(Base):
+    """Individual item in a shopping cart"""
+    __tablename__ = "cart_items"
+
+    id = Column(Integer, primary_key=True, index=True)
+    cart_id = Column(Integer, ForeignKey("carts.id", ondelete="CASCADE"), nullable=False)
+    product_id = Column(Integer, ForeignKey("products.id", ondelete="CASCADE"), nullable=False)
+    variant_id = Column(Integer, ForeignKey("product_variants.id", ondelete="SET NULL"), nullable=True)
+    quantity = Column(Integer, nullable=False, default=1)
+    
+    # Timestamps
+    added_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # Relationships
+    cart = relationship("Cart", back_populates="items")
+    product = relationship("Product")
+    variant = relationship("ProductVariant")

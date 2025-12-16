@@ -1,0 +1,567 @@
+"""
+Cart service for shopping cart operations
+"""
+from typing import Optional, List, Tuple
+from datetime import datetime, timedelta
+from sqlalchemy.orm import Session
+from fastapi import HTTPException
+
+from models import Cart, CartItem, Product, ProductVariant, User
+from schemas.cart import (
+    CartResponse, CartItemResponse, CartItemCreate, CartItemUpdate,
+    CartProductInfo, CartVariantInfo, CartSummary,
+    AddItemResponse, UpdateItemResponse, DeleteItemResponse,
+    ClearCartResponse, MergeCartResponse, StockWarning
+)
+
+# Expiration times
+GUEST_CART_EXPIRY_DAYS = 30
+USER_CART_EXPIRY_DAYS = 90
+
+
+def _get_expiry_date(is_authenticated: bool) -> datetime:
+    """Get expiration date based on user type"""
+    days = USER_CART_EXPIRY_DAYS if is_authenticated else GUEST_CART_EXPIRY_DAYS
+    return datetime.utcnow() + timedelta(days=days)
+
+
+def _get_unit_price(product: Product, variant: Optional[ProductVariant] = None) -> float:
+    """Get the current unit price (variant price overrides product price)"""
+    if variant:
+        if variant.sale_price is not None:
+            return variant.sale_price
+        if variant.regular_price is not None:
+            return variant.regular_price
+    
+    if product.sale_price is not None:
+        return product.sale_price
+    return product.regular_price or 0
+
+
+def _get_stock(product: Product, variant: Optional[ProductVariant] = None) -> Tuple[int, bool]:
+    """Get current stock and in_stock status"""
+    if variant:
+        return variant.stock or 0, variant.is_in_stock
+    return product.stock or 0, product.is_in_stock
+
+
+def _check_stock_status(quantity: int, available_stock: int, is_in_stock: bool) -> str:
+    """Determine stock status for a cart item"""
+    if not is_in_stock or available_stock <= 0:
+        return "out_of_stock"
+    if quantity > available_stock:
+        return "low_stock"
+    if available_stock <= 5:  # Low stock warning threshold
+        return "low_stock"
+    return "available"
+
+
+def _build_product_info(product: Product) -> CartProductInfo:
+    """Build product info for cart response"""
+    return CartProductInfo(
+        id=product.id,
+        seller_sku=product.seller_sku,
+        name=product.name,
+        image_url=product.image_url,
+        regular_price=product.regular_price,
+        sale_price=product.sale_price,
+        is_in_stock=product.is_in_stock,
+        stock=product.stock or 0
+    )
+
+
+def _build_variant_info(variant: ProductVariant) -> CartVariantInfo:
+    """Build variant info for cart response"""
+    return CartVariantInfo(
+        id=variant.id,
+        seller_sku=variant.seller_sku,
+        name=variant.name,
+        image_url=variant.image_url,
+        regular_price=variant.regular_price,
+        sale_price=variant.sale_price,
+        is_in_stock=variant.is_in_stock,
+        stock=variant.stock or 0
+    )
+
+
+def _build_item_response(item: CartItem, db: Session) -> CartItemResponse:
+    """Build full cart item response"""
+    product = item.product
+    variant = item.variant
+    
+    unit_price = _get_unit_price(product, variant)
+    stock, is_in_stock = _get_stock(product, variant)
+    stock_status = _check_stock_status(item.quantity, stock, is_in_stock)
+    
+    return CartItemResponse(
+        id=item.id,
+        product_id=item.product_id,
+        variant_id=item.variant_id,
+        quantity=item.quantity,
+        product=_build_product_info(product),
+        variant=_build_variant_info(variant) if variant else None,
+        unit_price=unit_price,
+        line_total=round(unit_price * item.quantity, 2),
+        stock_status=stock_status,
+        added_at=item.added_at
+    )
+
+
+def _build_cart_summary(cart: Cart, db: Session) -> CartSummary:
+    """Build cart summary"""
+    items_count = len(cart.items)
+    total_items = sum(item.quantity for item in cart.items)
+    subtotal = 0.0
+    
+    for item in cart.items:
+        unit_price = _get_unit_price(item.product, item.variant)
+        subtotal += unit_price * item.quantity
+    
+    return CartSummary(
+        items_count=items_count,
+        total_items=total_items,
+        subtotal=round(subtotal, 2)
+    )
+
+
+def _build_cart_response(cart: Cart, db: Session) -> CartResponse:
+    """Build full cart response with warnings"""
+    items = []
+    warnings = []
+    
+    for item in cart.items:
+        item_response = _build_item_response(item, db)
+        items.append(item_response)
+        
+        # Add warnings for stock issues
+        if item_response.stock_status == "out_of_stock":
+            warnings.append(StockWarning(
+                type="out_of_stock",
+                message=f"{item.product.name} is out of stock",
+                available_stock=0
+            ))
+        elif item_response.stock_status == "low_stock":
+            stock, _ = _get_stock(item.product, item.variant)
+            if item.quantity > stock:
+                warnings.append(StockWarning(
+                    type="low_stock",
+                    message=f"Only {stock} units of {item.product.name} available",
+                    available_stock=stock,
+                    requested_quantity=item.quantity
+                ))
+    
+    summary = _build_cart_summary(cart, db)
+    
+    return CartResponse(
+        id=cart.id,
+        items_count=summary.items_count,
+        total_items=summary.total_items,
+        subtotal=summary.subtotal,
+        items=items,
+        warnings=warnings
+    )
+
+
+# ---------- Cart Operations ----------
+
+def get_or_create_cart(
+    db: Session,
+    session_id: Optional[str] = None,
+    user: Optional[User] = None
+) -> Cart:
+    """
+    Get existing cart or create a new one.
+    Priority: user_id > session_id
+    """
+    cart = None
+    
+    # Try to find by user_id first
+    if user:
+        cart = db.query(Cart).filter(Cart.user_id == user.id).first()
+    
+    # If no user cart, try session_id
+    if not cart and session_id:
+        cart = db.query(Cart).filter(
+            Cart.session_id == session_id,
+            Cart.user_id == None
+        ).first()
+    
+    # Create new cart if none found
+    if not cart:
+        cart = Cart(
+            user_id=user.id if user else None,
+            session_id=session_id if not user else None,
+            expires_at=_get_expiry_date(user is not None)
+        )
+        db.add(cart)
+        db.commit()
+        db.refresh(cart)
+    else:
+        # Update expiry on access
+        cart.expires_at = _get_expiry_date(user is not None)
+        cart.updated_at = datetime.utcnow()
+        db.commit()
+    
+    return cart
+
+
+def get_cart(
+    db: Session,
+    session_id: Optional[str] = None,
+    user: Optional[User] = None
+) -> CartResponse:
+    """Get cart with all items and warnings"""
+    cart = get_or_create_cart(db, session_id, user)
+    return _build_cart_response(cart, db)
+
+
+def add_item(
+    db: Session,
+    data: CartItemCreate,
+    session_id: Optional[str] = None,
+    user: Optional[User] = None
+) -> AddItemResponse:
+    """Add item to cart with soft stock validation"""
+    # Validate product exists
+    product = db.query(Product).filter(Product.id == data.product_id).first()
+    if not product:
+        raise HTTPException(status_code=400, detail="Product not found")
+    
+    # Validate variant if provided
+    variant = None
+    if data.variant_id:
+        variant = db.query(ProductVariant).filter(
+            ProductVariant.id == data.variant_id
+        ).first()
+        if not variant:
+            raise HTTPException(status_code=400, detail="Variant not found")
+        
+        # Verify variant belongs to this product (through group)
+        if variant.group.product_id != product.id:
+            raise HTTPException(status_code=400, detail="Variant does not belong to this product")
+    
+    # Check if product requires variant
+    if product.has_variants and not data.variant_id:
+        raise HTTPException(
+            status_code=400, 
+            detail="This product has variants. Please select a variant."
+        )
+    
+    # Get or create cart
+    cart = get_or_create_cart(db, session_id, user)
+    
+    # Check if item already exists in cart
+    existing_item = db.query(CartItem).filter(
+        CartItem.cart_id == cart.id,
+        CartItem.product_id == data.product_id,
+        CartItem.variant_id == data.variant_id
+    ).first()
+    
+    warning = None
+    stock, is_in_stock = _get_stock(product, variant)
+    
+    if existing_item:
+        # Update quantity
+        new_quantity = existing_item.quantity + data.quantity
+        
+        # Soft stock validation (warning, not blocking)
+        if new_quantity > stock:
+            warning = StockWarning(
+                type="low_stock",
+                message=f"Only {stock} units available. Added to cart anyway.",
+                available_stock=stock,
+                requested_quantity=new_quantity
+            )
+        
+        existing_item.quantity = new_quantity
+        existing_item.updated_at = datetime.utcnow()
+        db.commit()
+        db.refresh(existing_item)
+        item = existing_item
+        message = "Item quantity updated"
+    else:
+        # Create new item
+        # Soft stock validation
+        if data.quantity > stock and stock > 0:
+            warning = StockWarning(
+                type="low_stock",
+                message=f"Only {stock} units available. Added to cart anyway.",
+                available_stock=stock,
+                requested_quantity=data.quantity
+            )
+        elif not is_in_stock or stock <= 0:
+            warning = StockWarning(
+                type="out_of_stock",
+                message="Product is currently out of stock. Added to cart anyway.",
+                available_stock=0,
+                requested_quantity=data.quantity
+            )
+        
+        item = CartItem(
+            cart_id=cart.id,
+            product_id=data.product_id,
+            variant_id=data.variant_id,
+            quantity=data.quantity
+        )
+        db.add(item)
+        db.commit()
+        db.refresh(item)
+        message = "Item added to cart"
+    
+    # Update cart timestamp
+    cart.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(cart)
+    
+    return AddItemResponse(
+        success=True,
+        message=message,
+        item=_build_item_response(item, db),
+        cart_summary=_build_cart_summary(cart, db),
+        warning=warning
+    )
+
+
+def update_item(
+    db: Session,
+    item_id: int,
+    data: CartItemUpdate,
+    session_id: Optional[str] = None,
+    user: Optional[User] = None
+) -> UpdateItemResponse:
+    """Update cart item quantity"""
+    cart = get_or_create_cart(db, session_id, user)
+    
+    # Find item in cart
+    item = db.query(CartItem).filter(
+        CartItem.id == item_id,
+        CartItem.cart_id == cart.id
+    ).first()
+    
+    if not item:
+        raise HTTPException(status_code=404, detail="Item not found in cart")
+    
+    # Soft stock validation
+    warning = None
+    stock, is_in_stock = _get_stock(item.product, item.variant)
+    
+    if data.quantity > stock:
+        warning = StockWarning(
+            type="low_stock",
+            message=f"Only {stock} units available",
+            available_stock=stock,
+            requested_quantity=data.quantity
+        )
+    
+    # Update quantity
+    item.quantity = data.quantity
+    item.updated_at = datetime.utcnow()
+    cart.updated_at = datetime.utcnow()
+    
+    db.commit()
+    db.refresh(item)
+    db.refresh(cart)
+    
+    return UpdateItemResponse(
+        success=True,
+        message="Item quantity updated",
+        item=_build_item_response(item, db),
+        cart_summary=_build_cart_summary(cart, db),
+        warning=warning
+    )
+
+
+def remove_item(
+    db: Session,
+    item_id: int,
+    session_id: Optional[str] = None,
+    user: Optional[User] = None
+) -> DeleteItemResponse:
+    """Remove item from cart"""
+    cart = get_or_create_cart(db, session_id, user)
+    
+    # Find item in cart
+    item = db.query(CartItem).filter(
+        CartItem.id == item_id,
+        CartItem.cart_id == cart.id
+    ).first()
+    
+    if not item:
+        raise HTTPException(status_code=404, detail="Item not found in cart")
+    
+    db.delete(item)
+    cart.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(cart)
+    
+    return DeleteItemResponse(
+        success=True,
+        message="Item removed from cart",
+        cart_summary=_build_cart_summary(cart, db)
+    )
+
+
+def clear_cart(
+    db: Session,
+    session_id: Optional[str] = None,
+    user: Optional[User] = None
+) -> ClearCartResponse:
+    """Remove all items from cart"""
+    cart = get_or_create_cart(db, session_id, user)
+    
+    # Delete all items
+    db.query(CartItem).filter(CartItem.cart_id == cart.id).delete()
+    cart.updated_at = datetime.utcnow()
+    db.commit()
+    
+    return ClearCartResponse(
+        success=True,
+        message="Cart cleared"
+    )
+
+
+def merge_carts(
+    db: Session,
+    session_id: str,
+    user: User
+) -> MergeCartResponse:
+    """
+    Merge guest cart into user cart on login.
+    - If user has no cart, assign guest cart to user
+    - If user has cart, merge items (guest quantities win on conflict)
+    - Delete guest cart after merge
+    """
+    # Find guest cart
+    guest_cart = db.query(Cart).filter(
+        Cart.session_id == session_id,
+        Cart.user_id == None
+    ).first()
+    
+    # Find user cart
+    user_cart = db.query(Cart).filter(Cart.user_id == user.id).first()
+    
+    merged_items = 0
+    
+    if not guest_cart:
+        # No guest cart to merge
+        if not user_cart:
+            # Create empty user cart
+            user_cart = Cart(
+                user_id=user.id,
+                expires_at=_get_expiry_date(True)
+            )
+            db.add(user_cart)
+            db.commit()
+            db.refresh(user_cart)
+        
+        return MergeCartResponse(
+            success=True,
+            message="No guest cart to merge",
+            merged_items=0,
+            cart=_build_cart_response(user_cart, db)
+        )
+    
+    if not user_cart:
+        # Assign guest cart to user
+        guest_cart.user_id = user.id
+        guest_cart.session_id = None
+        guest_cart.expires_at = _get_expiry_date(True)
+        guest_cart.updated_at = datetime.utcnow()
+        db.commit()
+        db.refresh(guest_cart)
+        
+        return MergeCartResponse(
+            success=True,
+            message="Guest cart assigned to user",
+            merged_items=len(guest_cart.items),
+            cart=_build_cart_response(guest_cart, db)
+        )
+    
+    # Merge items from guest cart into user cart
+    for guest_item in guest_cart.items:
+        # Check if item exists in user cart
+        existing_item = db.query(CartItem).filter(
+            CartItem.cart_id == user_cart.id,
+            CartItem.product_id == guest_item.product_id,
+            CartItem.variant_id == guest_item.variant_id
+        ).first()
+        
+        if existing_item:
+            # Take the higher quantity (guest wins on tie)
+            existing_item.quantity = max(existing_item.quantity, guest_item.quantity)
+            existing_item.updated_at = datetime.utcnow()
+        else:
+            # Move item to user cart
+            new_item = CartItem(
+                cart_id=user_cart.id,
+                product_id=guest_item.product_id,
+                variant_id=guest_item.variant_id,
+                quantity=guest_item.quantity
+            )
+            db.add(new_item)
+        
+        merged_items += 1
+    
+    # Delete guest cart (cascade deletes items)
+    db.delete(guest_cart)
+    
+    # Update user cart
+    user_cart.expires_at = _get_expiry_date(True)
+    user_cart.updated_at = datetime.utcnow()
+    
+    db.commit()
+    db.refresh(user_cart)
+    
+    return MergeCartResponse(
+        success=True,
+        message=f"Merged {merged_items} items from guest cart",
+        merged_items=merged_items,
+        cart=_build_cart_response(user_cart, db)
+    )
+
+
+def validate_cart_for_checkout(
+    db: Session,
+    session_id: Optional[str] = None,
+    user: Optional[User] = None
+) -> Tuple[bool, List[StockWarning], Cart]:
+    """
+    Hard validation for checkout.
+    Returns (is_valid, errors, cart)
+    If not valid, returns list of stock issues that must be resolved.
+    """
+    cart = get_or_create_cart(db, session_id, user)
+    errors = []
+    
+    for item in cart.items:
+        stock, is_in_stock = _get_stock(item.product, item.variant)
+        
+        if not is_in_stock or stock <= 0:
+            errors.append(StockWarning(
+                type="out_of_stock",
+                message=f"{item.product.name} is out of stock",
+                available_stock=0,
+                requested_quantity=item.quantity
+            ))
+        elif item.quantity > stock:
+            errors.append(StockWarning(
+                type="insufficient_stock",
+                message=f"Only {stock} units of {item.product.name} available",
+                available_stock=stock,
+                requested_quantity=item.quantity
+            ))
+    
+    return len(errors) == 0, errors, cart
+
+
+def cleanup_expired_carts(db: Session) -> int:
+    """Remove expired carts (run periodically)"""
+    now = datetime.utcnow()
+    expired = db.query(Cart).filter(Cart.expires_at < now).all()
+    count = len(expired)
+    
+    for cart in expired:
+        db.delete(cart)
+    
+    db.commit()
+    return count
