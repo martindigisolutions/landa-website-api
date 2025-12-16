@@ -693,6 +693,9 @@ def _product_to_response(product: Product) -> ProductAdminResponse:
         has_variants=product.has_variants,
         brand=product.brand,
         weight_lbs=product.weight_lbs or 0.0,
+        # Ordering fields for special sections
+        bestseller_order=product.bestseller_order or 0,
+        recommended_order=product.recommended_order or 0,
         # Timestamps
         created_at=product.created_at,
         updated_at=product.updated_at,

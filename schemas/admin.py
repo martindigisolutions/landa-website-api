@@ -266,6 +266,9 @@ class ProductCreate(BaseModel):
     # Related products (arrays of seller_sku strings)
     similar_products: List[str] = []  # Array of seller_sku
     frequently_bought_together: List[str] = []  # Array of seller_sku
+    # Ordering fields for special sections
+    bestseller_order: int = 0  # Order for bestseller section (0 = not featured, >0 = position)
+    recommended_order: int = 0  # Order for recommended section (0 = not featured, >0 = position)
 
 
 class ProductBulkCreate(BaseModel):
@@ -312,6 +315,9 @@ class ProductUpdate(BaseModel):
     # Related products (arrays of seller_sku strings)
     similar_products: Optional[List[str]] = None
     frequently_bought_together: Optional[List[str]] = None
+    # Ordering fields for special sections
+    bestseller_order: Optional[int] = None  # Order for bestseller section (0 = not featured, >0 = position)
+    recommended_order: Optional[int] = None  # Order for recommended section (0 = not featured, >0 = position)
 
 
 class ProductAdminResponse(BaseModel):
@@ -344,6 +350,9 @@ class ProductAdminResponse(BaseModel):
     has_variants: Optional[bool] = None
     brand: Optional[str] = None
     weight_lbs: Optional[float] = None  # Weight in pounds for shipping calculation
+    # Ordering fields for special sections
+    bestseller_order: int = 0  # Order for bestseller section (0 = not featured, >0 = position)
+    recommended_order: int = 0  # Order for recommended section (0 = not featured, >0 = position)
     # Timestamps
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
@@ -413,6 +422,9 @@ class ProductBulkUpdateItem(BaseModel):
     # Related products
     similar_products: Optional[List[str]] = None
     frequently_bought_together: Optional[List[str]] = None
+    # Ordering fields for special sections
+    bestseller_order: Optional[int] = None  # Order for bestseller section (0 = not featured, >0 = position)
+    recommended_order: Optional[int] = None  # Order for recommended section (0 = not featured, >0 = position)
 
 
 class ProductBulkUpdate(BaseModel):

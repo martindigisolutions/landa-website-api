@@ -51,6 +51,14 @@ def get_categories(
     - `category`: Filter by one or more category slugs (e.g., "tintes", "shampoos"). 
       Use multiple `category` parameters to filter by multiple categories: `?category=tintes&category=shampoos`
     - `category_group`: Filter by category group slug (e.g., "tipo-de-producto")
+    
+    **Sort Options:**
+    - `name`: Sort alphabetically by name (default)
+    - `price_asc`: Sort by price ascending
+    - `price_desc`: Sort by price descending
+    - `newest`: Sort by creation date descending
+    - `bestseller`: Sort by bestseller_order (products with order > 0, then by position)
+    - `recommended`: Sort by recommended_order (products with order > 0, then by position)
     """,
     response_model=PaginatedProductResponse
 )
@@ -65,7 +73,7 @@ def get_products(
     max_price: Optional[float] = Query(None, description="Maximum price filter"),
     category: Optional[List[str]] = Query(None, description="Filter by category slug(s). Can be repeated for multiple categories."),
     category_group: Optional[str] = Query(None, description="Filter by category group slug"),
-    sort_by: Optional[str] = Query("name", description="Sort by: name, price_asc, price_desc, newest"),
+    sort_by: Optional[str] = Query("name", description="Sort by: name, price_asc, price_desc, newest, bestseller, recommended"),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100)
 ):

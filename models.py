@@ -81,6 +81,10 @@ class Product(Base):
     similar_products = Column(JSON, default=list)  # Array of seller_sku
     frequently_bought_together = Column(JSON, default=list)  # Array of seller_sku
     
+    # Ordering fields for special sections
+    bestseller_order = Column(Integer, default=0)  # Order for bestseller section (0 = not featured, >0 = position)
+    recommended_order = Column(Integer, default=0)  # Order for recommended section (0 = not featured, >0 = position)
+    
     # Timestamps
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

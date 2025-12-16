@@ -206,6 +206,8 @@ def _product_to_public(product: Product, lang: str = "es", db: Session = None) -
         currency=product.currency,
         has_variants=product.has_variants,
         brand=product.brand,
+        bestseller_order=product.bestseller_order or 0,
+        recommended_order=product.recommended_order or 0,
         variant_types=variant_types,
         similar_products=similar,
         frequently_bought_together=frequently_bought
@@ -273,6 +275,12 @@ def get_products(
         query = query.order_by(Product.regular_price.desc())
     elif sort_by == "newest":
         query = query.order_by(Product.created_at.desc())
+    elif sort_by == "bestseller":
+        # Products with bestseller_order > 0 first, then by order ascending
+        query = query.filter(Product.bestseller_order > 0).order_by(Product.bestseller_order.asc())
+    elif sort_by == "recommended":
+        # Products with recommended_order > 0 first, then by order ascending
+        query = query.filter(Product.recommended_order > 0).order_by(Product.recommended_order.asc())
     else:
         query = query.order_by(Product.name)
     
@@ -286,7 +294,7 @@ def get_products(
         total_items=total_items,
         total_pages=total_pages,
         sorted_by=sort_by,
-        results=[_product_to_public(p, lang) for p in products]
+        results=[_product_to_public(p, lang, db) for p in products]
     )
 
 

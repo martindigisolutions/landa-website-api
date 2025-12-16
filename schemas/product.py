@@ -105,6 +105,9 @@ class ProductPublic(BaseModel):
     currency: Optional[str] = None
     has_variants: Optional[bool] = None
     brand: Optional[str] = None
+    # Ordering fields for special sections
+    bestseller_order: int = 0  # Order for bestseller section (0 = not featured, >0 = position)
+    recommended_order: int = 0  # Order for recommended section (0 = not featured, >0 = position)
     variant_types: List[VariantTypePublic] = []  # Grouped by variant_type
     # Related products (resolved to actual product data, only existing & in-stock)
     similar_products: List[RelatedProductPublic] = []
