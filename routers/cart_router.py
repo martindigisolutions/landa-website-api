@@ -15,7 +15,7 @@ from config import SECRET_KEY, ALGORITHM
 from schemas.cart import (
     CartResponse, CartItemCreate, CartItemUpdate,
     AddItemResponse, UpdateItemResponse, DeleteItemResponse,
-    ClearCartResponse, MergeCartResponse
+    ClearCartResponse, MergeCartResponse, RecommendationsResponse
 )
 
 router = APIRouter(prefix="/cart", tags=["Cart"])
@@ -284,3 +284,46 @@ def validate_cart(
         "errors": [e.model_dump() for e in errors],
         "cart_id": cart.id
     }
+
+
+@router.get(
+    "/recommendations",
+    response_model=RecommendationsResponse,
+    summary="Get product recommendations based on cart",
+    description="""
+    Get personalized product recommendations based on items in the cart.
+    
+    **Algorithm:**
+    - Analyzes all products in the cart
+    - Finds products frequently bought together with cart items
+    - Ranks by how many cart items recommend each product
+    - Excludes products already in the cart
+    
+    **Headers:**
+    - `X-Session-ID`: Required for guest users
+    - `Authorization`: Bearer token (optional)
+    
+    **Query Parameters:**
+    - `limit`: Maximum number of recommendations (default: 10, max: 20)
+    
+    **Response:**
+    - `recommendations`: List of recommended products with scores
+    - `based_on_items`: Number of cart items used for analysis
+    """
+)
+def get_recommendations(
+    limit: int = 10,
+    session_id: Optional[str] = Depends(get_session_id),
+    user: Optional[User] = Depends(get_optional_user),
+    db: Session = Depends(get_db)
+):
+    if not session_id and not user:
+        raise HTTPException(
+            status_code=400,
+            detail="X-Session-ID header is required for guest users"
+        )
+    
+    # Cap limit at 20
+    limit = min(limit, 20)
+    
+    return cart_service.get_cart_recommendations(db, session_id, user, limit)

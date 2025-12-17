@@ -155,3 +155,29 @@ class MergeCartResponse(BaseModel):
     message: str
     merged_items: int
     cart: CartResponse
+
+
+# ---------- Recommendations ----------
+
+class RecommendedProduct(BaseModel):
+    """Recommended product info"""
+    id: int
+    seller_sku: Optional[str] = None
+    name: str
+    name_en: Optional[str] = None
+    image_url: Optional[str] = None
+    regular_price: Optional[float] = None
+    sale_price: Optional[float] = None
+    is_in_stock: bool = True
+    stock: int = 0
+    brand: Optional[str] = None
+    recommendation_score: int  # How many cart items recommend this product
+
+    class Config:
+        from_attributes = True
+
+
+class RecommendationsResponse(BaseModel):
+    """Response for cart-based recommendations ('Te puede interesar')"""
+    recommendations: List[RecommendedProduct] = []
+    based_on_items: int  # Number of cart items used for recommendations

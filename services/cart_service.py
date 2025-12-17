@@ -6,12 +6,14 @@ from datetime import datetime, timedelta
 from sqlalchemy.orm import Session
 from fastapi import HTTPException
 
+from collections import Counter
 from models import Cart, CartItem, Product, ProductVariant, User
 from schemas.cart import (
     CartResponse, CartItemResponse, CartItemCreate, CartItemUpdate,
     CartProductInfo, CartVariantInfo, CartSummary,
     AddItemResponse, UpdateItemResponse, DeleteItemResponse,
-    ClearCartResponse, MergeCartResponse, StockWarning
+    ClearCartResponse, MergeCartResponse, StockWarning,
+    RecommendedProduct, RecommendationsResponse
 )
 
 # Expiration times
@@ -565,3 +567,90 @@ def cleanup_expired_carts(db: Session) -> int:
     
     db.commit()
     return count
+
+
+def get_cart_recommendations(
+    db: Session,
+    session_id: Optional[str] = None,
+    user: Optional[User] = None,
+    limit: int = 10
+) -> RecommendationsResponse:
+    """
+    Get product recommendations based on cart items.
+    
+    Algorithm:
+    1. Get all products currently in the cart
+    2. For each product, get its 'frequently_bought_together' SKUs
+    3. Count how many times each SKU appears across all cart items
+    4. Exclude products already in the cart
+    5. Return top products sorted by recommendation score (frequency count)
+    """
+    cart = get_or_create_cart(db, session_id, user)
+    
+    if not cart.items:
+        return RecommendationsResponse(
+            recommendations=[],
+            based_on_items=0
+        )
+    
+    # Get all product IDs and seller_skus in cart
+    cart_product_ids = set()
+    cart_skus = set()
+    
+    for item in cart.items:
+        cart_product_ids.add(item.product_id)
+        if item.product and item.product.seller_sku:
+            cart_skus.add(item.product.seller_sku)
+    
+    # Collect all frequently_bought_together SKUs from cart products
+    sku_counter = Counter()
+    
+    for item in cart.items:
+        product = item.product
+        if product and product.frequently_bought_together:
+            for sku in product.frequently_bought_together:
+                # Exclude SKUs already in cart
+                if sku and sku not in cart_skus:
+                    sku_counter[sku] += 1
+    
+    if not sku_counter:
+        return RecommendationsResponse(
+            recommendations=[],
+            based_on_items=len(cart.items)
+        )
+    
+    # Get the most common SKUs (sorted by frequency, then limit)
+    top_skus = [sku for sku, _ in sku_counter.most_common(limit * 2)]  # Get extra in case some don't exist
+    
+    # Fetch products by seller_sku
+    recommended_products = db.query(Product).filter(
+        Product.seller_sku.in_(top_skus),
+        Product.id.notin_(cart_product_ids)  # Double-check exclusion
+    ).all()
+    
+    # Create a map of sku -> product for sorting
+    sku_to_product = {p.seller_sku: p for p in recommended_products}
+    
+    # Build response sorted by recommendation score
+    recommendations = []
+    for sku in top_skus:
+        if sku in sku_to_product and len(recommendations) < limit:
+            product = sku_to_product[sku]
+            recommendations.append(RecommendedProduct(
+                id=product.id,
+                seller_sku=product.seller_sku,
+                name=product.name,
+                name_en=product.name_en,
+                image_url=product.image_url,
+                regular_price=product.regular_price,
+                sale_price=product.sale_price,
+                is_in_stock=product.is_in_stock,
+                stock=product.stock or 0,
+                brand=product.brand,
+                recommendation_score=sku_counter[sku]
+            ))
+    
+    return RecommendationsResponse(
+        recommendations=recommendations,
+        based_on_items=len(cart.items)
+    )
