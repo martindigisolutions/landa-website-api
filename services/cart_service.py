@@ -647,6 +647,7 @@ def get_cart_recommendations(
                 is_in_stock=product.is_in_stock,
                 stock=product.stock or 0,
                 brand=product.brand,
+                has_variants=product.has_variants,
                 recommendation_score=sku_counter[sku]
             ))
     

@@ -171,6 +171,7 @@ class RecommendedProduct(BaseModel):
     is_in_stock: bool = True
     stock: int = 0
     brand: Optional[str] = None
+    has_variants: bool = False
     recommendation_score: int  # How many cart items recommend this product
 
     class Config:
