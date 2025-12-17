@@ -61,7 +61,7 @@ class Product(Base):
     stock = Column(Integer, default=0)
     is_in_stock = Column(Boolean, default=True)
     restock_date = Column(Date, nullable=True)
-    low_stock_threshold = Column(Integer, default=5)
+    low_stock_threshold = Column(Integer, default=10)
     
     # Display
     is_favorite = Column(Boolean, default=False)
