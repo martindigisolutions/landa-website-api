@@ -1,6 +1,11 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
+from sqlalchemy import or_
+from jose import jwt, JWTError
 from database import get_db
+from models import User
+from config import SECRET_KEY, ALGORITHM
 from services import checkout_service
 from services import shipping_service
 from schemas.checkout import (
@@ -14,23 +19,135 @@ from schemas.checkout import (
     UpdateAddressRequest,
     UpdateAddressResponse,
     CalculateShippingRequest,
-    CalculateShippingResponse
+    CalculateShippingResponse,
+    CheckoutValidationResponse
 )
 from typing import List, Optional
 
 router = APIRouter(prefix="/checkout", tags=["Checkout"])
 
-@router.post("/", summary="Iniciar sesión de checkout")
-def start_checkout(data: CheckoutSessionCreate, db: Session = Depends(get_db)):
-    return checkout_service.start_checkout_session(data, db)
+# Optional OAuth2 scheme (doesn't auto-raise 401)
+oauth2_scheme_optional = OAuth2PasswordBearer(tokenUrl="/login", auto_error=False)
+
+
+def get_session_id(x_session_id: Optional[str] = Header(None, alias="X-Session-ID")) -> Optional[str]:
+    """Extract session ID from header"""
+    return x_session_id
+
+
+def get_optional_user(
+    db: Session = Depends(get_db),
+    token: Optional[str] = Depends(oauth2_scheme_optional)
+) -> Optional[User]:
+    """Get user if authenticated, None otherwise"""
+    if not token:
+        return None
+    
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        identifier = payload.get("sub")
+        if not identifier:
+            return None
+        
+        user = db.query(User).filter(
+            or_(
+                User.email == identifier,
+                User.phone == identifier,
+                User.whatsapp_phone == identifier
+            )
+        ).first()
+        
+        if not user or user.is_blocked or user.is_suspended:
+            return None
+        
+        return user
+    except JWTError:
+        return None
+
+@router.post("/", response_model=CheckoutValidationResponse, summary="Iniciar sesión de checkout")
+def start_checkout(
+    data: CheckoutSessionCreate,
+    session_id: Optional[str] = Depends(get_session_id),
+    user: Optional[User] = Depends(get_optional_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Start a checkout session using the server-side cart.
+    
+    **Important:** Products are NOT sent by the frontend. The API reads 
+    directly from the cart stored on the server.
+    
+    **Headers:**
+    - `X-Session-ID`: Required for guest users
+    - `Authorization`: Bearer token (for authenticated users)
+    
+    **Response:**
+    - `valid`: Whether the cart is ready for checkout
+    - `checkout_id`: ID to use for subsequent checkout steps
+    - `issues`: List of problems that need to be resolved (if any)
+    
+    **Possible issues:**
+    - `product_removed`: Product no longer exists
+    - `out_of_stock`: Product/variant is out of stock
+    - `insufficient_stock`: Requested quantity exceeds available stock
+    """
+    if not session_id and not user:
+        raise HTTPException(
+            status_code=400,
+            detail="X-Session-ID header is required for guest users"
+        )
+    
+    return checkout_service.start_checkout_session(session_id, user, db)
 
 @router.post("/options", summary="Obtener métodos de pago y envío disponibles")
 def get_checkout_options(data: CheckoutOptionsRequest, db: Session = Depends(get_db)):
     return checkout_service.get_checkout_options(data, db)
 
 @router.post("/order", summary="Crear orden final")
-def create_order(data: OrderCreate, db: Session = Depends(get_db)):
-    return checkout_service.create_order(data, db)
+def create_order(
+    data: OrderCreate,
+    session_id: Optional[str] = Depends(get_session_id),
+    user: Optional[User] = Depends(get_optional_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Create a final order using the server-side cart.
+    
+    **Important:** Products are NOT sent by the frontend. The API reads 
+    directly from the cart stored on the server.
+    
+    **Headers:**
+    - `X-Session-ID`: Required for guest users
+    - `Authorization`: Bearer token (for authenticated users)
+    
+    **Body:**
+    - `address`: Shipping address
+    - `shipping_method`: Selected shipping method
+    - `payment_method`: Selected payment method
+    
+    **What happens:**
+    1. Validates all cart items (stock, availability)
+    2. Creates the order with current prices from DB
+    3. Deducts stock from products/variants
+    4. Clears the cart
+    
+    **Response:**
+    - `order_id`: The created order ID
+    - `status`: Order status (pending_payment)
+    - `total`: Order total
+    - `items_count`: Number of items in the order
+    
+    **Errors:**
+    - 400: Cart is empty or invalid request
+    - 409: Cart validation failed (stock issues, removed products)
+    """
+    if not session_id and not user:
+        raise HTTPException(
+            status_code=400,
+            detail="X-Session-ID header is required for guest users"
+        )
+    
+    return checkout_service.create_order(data, session_id, user, db)
 
 @router.post("/order/confirm-manual-payment", summary="Confirmar pago manual")
 def confirm_manual_payment(data: ConfirmManualPayment, db: Session = Depends(get_db)):

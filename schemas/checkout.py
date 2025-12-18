@@ -3,14 +3,19 @@ from typing import List, Optional
 from datetime import datetime
 
 class ProductInCart(BaseModel):
+    """Used for shipping calculation (not for checkout)"""
     product_id: int
     quantity: int
     variant_id: Optional[int] = None  # For products with variants
 
+
 class CheckoutSessionCreate(BaseModel):
-    session_id: str
-    user_id: Optional[int]
-    products: List[ProductInCart]
+    """
+    Start a checkout session using the server-side cart.
+    Products are read from the cart, not sent by the frontend.
+    For authenticated users, user is extracted from JWT token.
+    """
+    session_id: Optional[str] = None  # Required for guest users only
 
 class Address(BaseModel):
     city: str
@@ -23,15 +28,40 @@ class CheckoutOptionsRequest(BaseModel):
     shipping_method: str
 
 class OrderCreate(BaseModel):
-    session_id: str
-    user_id: Optional[int]
-    products: List[ProductInCart]
+    """
+    Create an order using the server-side cart.
+    Products are read from the cart, not sent by the frontend.
+    For authenticated users, user is extracted from JWT token.
+    """
+    session_id: Optional[str] = None  # Required for guest users only
     address: Address
     shipping_method: str
     payment_method: str
 
 class ConfirmManualPayment(BaseModel):
     order_id: str
+
+
+# === Checkout validation responses ===
+
+class CartValidationIssue(BaseModel):
+    """Issue found during cart validation"""
+    type: str  # "product_removed", "out_of_stock", "insufficient_stock", "price_changed"
+    product_id: int
+    product_name: Optional[str] = None
+    variant_id: Optional[int] = None
+    variant_name: Optional[str] = None
+    message: str
+    requested_quantity: Optional[int] = None
+    available_stock: Optional[int] = None
+
+
+class CheckoutValidationResponse(BaseModel):
+    """Response when checkout validation fails"""
+    valid: bool
+    checkout_id: Optional[str] = None
+    issues: List[CartValidationIssue] = []
+    message: str
 
 class PaymentDetailsResponse(BaseModel):
     payment_type: str

@@ -1,53 +1,172 @@
 from sqlalchemy.orm import Session
 from fastapi import HTTPException
-from models import Product, ProductVariant, Order, OrderItem
-from schemas.checkout import CheckoutSessionCreate, CheckoutOptionsRequest, OrderCreate, ConfirmManualPayment
+from models import Product, ProductVariant, Order, OrderItem, Cart, CartItem, User
+from schemas.checkout import (
+    CheckoutOptionsRequest, OrderCreate, 
+    ConfirmManualPayment, CartValidationIssue, CheckoutValidationResponse
+)
 from uuid import uuid4
-from typing import Optional
+from typing import Optional, List, Tuple
 
-def start_checkout_session(data: CheckoutSessionCreate, db: Session):
-    for item in data.products:
-        product = db.query(Product).filter(Product.id == item.product_id).first()
-        if not product:
-            raise HTTPException(status_code=400, detail=f"Product {item.product_id} not found")
+
+def _get_cart(db: Session, session_id: Optional[str], user_id: Optional[int]) -> Optional[Cart]:
+    """Get cart by user_id or session_id"""
+    if user_id:
+        return db.query(Cart).filter(Cart.user_id == user_id).first()
+    if session_id:
+        return db.query(Cart).filter(
+            Cart.session_id == session_id,
+            Cart.user_id == None
+        ).first()
+    return None
+
+
+def _get_item_price(product: Product, variant: Optional[ProductVariant]) -> float:
+    """Get the current price for a product/variant"""
+    if variant:
+        if variant.sale_price is not None:
+            return variant.sale_price
+        if variant.regular_price is not None:
+            return variant.regular_price
+    if product.sale_price is not None:
+        return product.sale_price
+    return product.regular_price or 0
+
+
+def _get_item_stock(product: Product, variant: Optional[ProductVariant]) -> Tuple[int, bool]:
+    """Get stock and is_in_stock for product/variant"""
+    if variant:
+        return variant.stock or 0, variant.is_in_stock
+    return product.stock or 0, product.is_in_stock
+
+
+def _is_item_orphaned(item: CartItem) -> bool:
+    """Check if cart item references deleted product or variant"""
+    # Product was deleted
+    if item.product is None:
+        return True
+    # Variant was deleted (variant_id exists but variant is None)
+    if item.variant_id is not None and item.variant is None:
+        return True
+    return False
+
+
+def _validate_cart_items(cart: Cart, db: Session) -> Tuple[List[CartItem], List[CartValidationIssue]]:
+    """
+    Validate all cart items and return valid items + any issues found.
+    Also cleans up orphaned items (deleted products/variants).
+    """
+    valid_items = []
+    issues = []
+    items_to_remove = []
+    
+    for item in cart.items:
+        product = item.product
+        variant = item.variant
         
-        # If product has variants, variant_id is required
-        if product.has_variants:
-            if not item.variant_id:
-                raise HTTPException(
-                    status_code=400, 
-                    detail=f"Product {item.product_id} requires a variant_id"
-                )
-            # Validate variant belongs to this product
-            variant = db.query(ProductVariant).filter(ProductVariant.id == item.variant_id).first()
-            if not variant:
-                raise HTTPException(
-                    status_code=400, 
-                    detail=f"Variant {item.variant_id} not found"
-                )
-            # Check variant belongs to this product (through group)
-            if variant.group.product_id != product.id:
-                raise HTTPException(
-                    status_code=400, 
-                    detail=f"Variant {item.variant_id} does not belong to product {item.product_id}"
-                )
-            # Check variant stock
-            if not variant.is_in_stock:
-                raise HTTPException(
-                    status_code=400, 
-                    detail=f"Variant {variant.name} is out of stock"
-                )
-        else:
-            # Product without variants
-            if not product.is_in_stock:
-                raise HTTPException(status_code=400, detail=f"Product {item.product_id} is out of stock")
+        # Product or variant was deleted
+        if _is_item_orphaned(item):
+            items_to_remove.append(item)
+            if product is None:
+                issues.append(CartValidationIssue(
+                    type="product_removed",
+                    product_id=item.product_id,
+                    message="This product is no longer available"
+                ))
+            else:
+                # Variant was deleted
+                issues.append(CartValidationIssue(
+                    type="variant_removed",
+                    product_id=item.product_id,
+                    product_name=product.name,
+                    variant_id=item.variant_id,
+                    message=f"The selected variant of {product.name} is no longer available"
+                ))
+            continue
+        
+        stock, is_in_stock = _get_item_stock(product, variant)
+        
+        # Product/variant is out of stock
+        if not is_in_stock or stock <= 0:
+            issues.append(CartValidationIssue(
+                type="out_of_stock",
+                product_id=product.id,
+                product_name=product.name,
+                variant_id=variant.id if variant else None,
+                variant_name=variant.name if variant else None,
+                message=f"{product.name}{' - ' + variant.name if variant else ''} is out of stock",
+                requested_quantity=item.quantity,
+                available_stock=0
+            ))
+            continue
+        
+        # Insufficient stock
+        if item.quantity > stock:
+            issues.append(CartValidationIssue(
+                type="insufficient_stock",
+                product_id=product.id,
+                product_name=product.name,
+                variant_id=variant.id if variant else None,
+                variant_name=variant.name if variant else None,
+                message=f"Only {stock} units of {product.name}{' - ' + variant.name if variant else ''} available",
+                requested_quantity=item.quantity,
+                available_stock=stock
+            ))
+            continue
+        
+        # Item is valid
+        valid_items.append(item)
+    
+    # Clean up orphaned items (deleted products or variants)
+    if items_to_remove:
+        for orphan in items_to_remove:
+            db.delete(orphan)
+        db.commit()
+    
+    return valid_items, issues
 
-    checkout_id = data.session_id or str(uuid4())
 
-    return {
-        "checkout_id": checkout_id,
-        "status": "draft"
-    }
+def start_checkout_session(
+    session_id: Optional[str],
+    user: Optional[User],
+    db: Session
+):
+    """
+    Start a checkout session using the server-side cart.
+    Validates all items in the cart and returns issues if any.
+    """
+    user_id = user.id if user else None
+    
+    # Get cart from server
+    cart = _get_cart(db, session_id, user_id)
+    
+    if not cart or not cart.items:
+        raise HTTPException(
+            status_code=400, 
+            detail="Cart is empty"
+        )
+    
+    # Validate all items
+    valid_items, issues = _validate_cart_items(cart, db)
+    
+    checkout_id = session_id or str(uuid4())
+    
+    # If there are issues, return them so frontend can handle
+    if issues:
+        return CheckoutValidationResponse(
+            valid=False,
+            checkout_id=checkout_id,
+            issues=issues,
+            message="Some items in your cart have issues that need to be resolved"
+        )
+    
+    # All items valid
+    return CheckoutValidationResponse(
+        valid=True,
+        checkout_id=checkout_id,
+        issues=[],
+        message="Cart validated successfully"
+    )
 
 
 def get_checkout_options(data: CheckoutOptionsRequest, db: Session):
@@ -92,68 +211,79 @@ def get_checkout_options(data: CheckoutOptionsRequest, db: Session):
         "payment_methods": payment_methods
     }
 
-def create_order(data: OrderCreate, db: Session):
+def create_order(
+    data: OrderCreate,
+    session_id: Optional[str],
+    user: Optional[User],
+    db: Session
+):
+    """
+    Create an order using the server-side cart.
+    Validates stock, creates order, deducts stock, and clears cart.
+    """
     valid_methods = ["stripe", "zelle", "cashapp", "venmo", "credit_card", "cash"]
     if data.payment_method not in valid_methods:
         raise HTTPException(status_code=400, detail="Invalid payment method")
-
-    # Calculate total and validate items
+    
+    user_id = user.id if user else None
+    
+    # Get cart from server
+    cart = _get_cart(db, session_id, user_id)
+    
+    if not cart or not cart.items:
+        raise HTTPException(status_code=400, detail="Cart is empty")
+    
+    # Validate all items (strict validation)
+    valid_items, issues = _validate_cart_items(cart, db)
+    
+    if issues:
+        # Return validation errors - frontend should handle these
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": "cart_validation_failed",
+                "message": "Some items in your cart have issues",
+                "issues": [issue.model_dump() for issue in issues]
+            }
+        )
+    
+    if not valid_items:
+        raise HTTPException(status_code=400, detail="No valid items in cart")
+    
+    # Calculate total and prepare order items
     total = 0.0
     order_items_data = []
     
-    for item in data.products:
-        product = db.query(Product).filter(Product.id == item.product_id).first()
-        if not product:
-            raise HTTPException(status_code=404, detail=f"Product {item.product_id} not found")
+    for item in valid_items:
+        product = item.product
+        variant = item.variant
         
-        variant = None
-        variant_name = None
-        
-        # Handle products with variants
-        if product.has_variants:
-            if not item.variant_id:
-                raise HTTPException(
-                    status_code=400, 
-                    detail=f"Product {item.product_id} requires a variant_id"
-                )
-            variant = db.query(ProductVariant).filter(ProductVariant.id == item.variant_id).first()
-            if not variant:
-                raise HTTPException(status_code=404, detail=f"Variant {item.variant_id} not found")
-            if variant.group.product_id != product.id:
-                raise HTTPException(
-                    status_code=400, 
-                    detail=f"Variant {item.variant_id} does not belong to product {item.product_id}"
-                )
-            # Use variant price if set, otherwise use product price
-            price = variant.sale_price or variant.regular_price or product.sale_price or product.regular_price
-            variant_name = variant.name
-        else:
-            # Product without variants
-            price = product.sale_price or product.regular_price
-        
+        price = _get_item_price(product, variant)
         total += price * item.quantity
+        
         order_items_data.append({
             "product_id": product.id,
-            "variant_id": item.variant_id,
-            "variant_name": variant_name,
+            "variant_id": variant.id if variant else None,
+            "variant_name": variant.name if variant else None,
             "quantity": item.quantity,
             "price": price
         })
-
+    
+    # Create order
     order = Order(
-        session_id=data.session_id,
-        user_id=data.user_id,
+        session_id=session_id,
+        user_id=user_id,
         shipping_method=data.shipping_method,
         payment_method=data.payment_method,
-        address=data.address.dict(),
+        address=data.address.model_dump(),
         total=total,
         status="pending_payment"
     )
     db.add(order)
     db.flush()
-
-    # Create order items
-    for item_data in order_items_data:
+    
+    # Create order items and deduct stock
+    for i, item_data in enumerate(order_items_data):
         db.add(OrderItem(
             order_id=order.id,
             product_id=item_data["product_id"],
@@ -162,12 +292,28 @@ def create_order(data: OrderCreate, db: Session):
             quantity=item_data["quantity"],
             price=item_data["price"]
         ))
-
+        
+        # Deduct stock
+        cart_item = valid_items[i]
+        if cart_item.variant:
+            cart_item.variant.stock = max(0, (cart_item.variant.stock or 0) - item_data["quantity"])
+            if cart_item.variant.stock <= 0:
+                cart_item.variant.is_in_stock = False
+        else:
+            cart_item.product.stock = max(0, (cart_item.product.stock or 0) - item_data["quantity"])
+            if cart_item.product.stock <= 0:
+                cart_item.product.is_in_stock = False
+    
+    # Clear cart after successful order
+    db.query(CartItem).filter(CartItem.cart_id == cart.id).delete()
+    
     db.commit()
-
+    
     return {
-        "order_id": f"{order.id}",
-        "status": "pending_payment"
+        "order_id": str(order.id),
+        "status": "pending_payment",
+        "total": total,
+        "items_count": len(order_items_data)
     }
 
 def confirm_manual_payment(data: ConfirmManualPayment, db: Session):

@@ -27,7 +27,9 @@ class CartVariantInfo(BaseModel):
     """Variant information for cart display"""
     id: int
     seller_sku: Optional[str] = None
-    name: str
+    name: str  # Display name e.g., "Rubio", "1 Kg", "Vol 30"
+    variant_type: Optional[str] = None  # Type e.g., "Color", "Tamaño", "Volumen"
+    variant_value: Optional[str] = None  # Clean value for display
     image_url: Optional[str] = None
     regular_price: Optional[float] = None
     sale_price: Optional[float] = None

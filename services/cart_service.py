@@ -74,10 +74,17 @@ def _build_product_info(product: Product) -> CartProductInfo:
 
 def _build_variant_info(variant: ProductVariant) -> CartVariantInfo:
     """Build variant info for cart response"""
+    # Get variant type from the group
+    variant_type = None
+    if variant.group:
+        variant_type = variant.group.variant_type
+    
     return CartVariantInfo(
         id=variant.id,
         seller_sku=variant.seller_sku,
         name=variant.name,
+        variant_type=variant_type,  # e.g., "Color", "Tamaño", "Volumen"
+        variant_value=variant.variant_value,  # Clean value for display
         image_url=variant.image_url,
         regular_price=variant.regular_price,
         sale_price=variant.sale_price,
@@ -86,10 +93,25 @@ def _build_variant_info(variant: ProductVariant) -> CartVariantInfo:
     )
 
 
-def _build_item_response(item: CartItem, db: Session) -> CartItemResponse:
-    """Build full cart item response"""
+def _is_item_orphaned(item: CartItem) -> bool:
+    """Check if cart item references deleted product or variant"""
+    # Product was deleted
+    if item.product is None:
+        return True
+    # Variant was deleted (variant_id exists but variant is None)
+    if item.variant_id is not None and item.variant is None:
+        return True
+    return False
+
+
+def _build_item_response(item: CartItem, db: Session) -> Optional[CartItemResponse]:
+    """Build full cart item response. Returns None if product/variant was deleted."""
     product = item.product
     variant = item.variant
+    
+    # Handle deleted product or variant
+    if _is_item_orphaned(item):
+        return None
     
     unit_price = _get_unit_price(product, variant)
     stock, is_in_stock = _get_stock(product, variant)
@@ -110,12 +132,18 @@ def _build_item_response(item: CartItem, db: Session) -> CartItemResponse:
 
 
 def _build_cart_summary(cart: Cart, db: Session) -> CartSummary:
-    """Build cart summary"""
-    items_count = len(cart.items)
-    total_items = sum(item.quantity for item in cart.items)
+    """Build cart summary (excludes deleted products/variants)"""
+    items_count = 0
+    total_items = 0
     subtotal = 0.0
     
     for item in cart.items:
+        # Skip deleted products or variants
+        if _is_item_orphaned(item):
+            continue
+        
+        items_count += 1
+        total_items += item.quantity
         unit_price = _get_unit_price(item.product, item.variant)
         subtotal += unit_price * item.quantity
     
@@ -130,9 +158,18 @@ def _build_cart_response(cart: Cart, db: Session) -> CartResponse:
     """Build full cart response with warnings"""
     items = []
     warnings = []
+    items_to_remove = []
+    removed_count = 0
     
     for item in cart.items:
         item_response = _build_item_response(item, db)
+        
+        # Handle deleted products - mark for removal
+        if item_response is None:
+            items_to_remove.append(item)
+            removed_count += 1
+            continue
+        
         items.append(item_response)
         
         # Add warnings for stock issues
@@ -151,6 +188,19 @@ def _build_cart_response(cart: Cart, db: Session) -> CartResponse:
                     available_stock=stock,
                     requested_quantity=item.quantity
                 ))
+    
+    # Remove orphaned cart items (products that were deleted)
+    if items_to_remove:
+        for orphan_item in items_to_remove:
+            db.delete(orphan_item)
+        db.commit()
+        
+        # Add warning about removed products
+        warnings.insert(0, StockWarning(
+            type="products_removed",
+            message=f"{removed_count} product(s) were removed from your cart because they are no longer available",
+            available_stock=0
+        ))
     
     summary = _build_cart_summary(cart, db)
     
@@ -534,8 +584,14 @@ def validate_cart_for_checkout(
     """
     cart = get_or_create_cart(db, session_id, user)
     errors = []
+    items_to_remove = []
     
     for item in cart.items:
+        # Handle deleted products or variants
+        if _is_item_orphaned(item):
+            items_to_remove.append(item)
+            continue
+        
         stock, is_in_stock = _get_stock(item.product, item.variant)
         
         if not is_in_stock or stock <= 0:
@@ -552,6 +608,17 @@ def validate_cart_for_checkout(
                 available_stock=stock,
                 requested_quantity=item.quantity
             ))
+    
+    # Clean up orphaned items (deleted products or variants)
+    if items_to_remove:
+        for orphan_item in items_to_remove:
+            db.delete(orphan_item)
+        db.commit()
+        errors.insert(0, StockWarning(
+            type="products_removed",
+            message=f"{len(items_to_remove)} item(s) were removed because they are no longer available",
+            available_stock=0
+        ))
     
     return len(errors) == 0, errors, cart
 
@@ -593,21 +660,25 @@ def get_cart_recommendations(
             based_on_items=0
         )
     
-    # Get all product IDs and seller_skus in cart
+    # Get all product IDs and seller_skus in cart (skip deleted products/variants)
     cart_product_ids = set()
     cart_skus = set()
+    valid_items = []
     
     for item in cart.items:
+        if _is_item_orphaned(item):
+            continue  # Skip deleted products/variants
+        valid_items.append(item)
         cart_product_ids.add(item.product_id)
-        if item.product and item.product.seller_sku:
+        if item.product.seller_sku:
             cart_skus.add(item.product.seller_sku)
     
     # Collect all frequently_bought_together SKUs from cart products
     sku_counter = Counter()
     
-    for item in cart.items:
+    for item in valid_items:
         product = item.product
-        if product and product.frequently_bought_together:
+        if product.frequently_bought_together:
             for sku in product.frequently_bought_together:
                 # Exclude SKUs already in cart
                 if sku and sku not in cart_skus:
@@ -616,7 +687,7 @@ def get_cart_recommendations(
     if not sku_counter:
         return RecommendationsResponse(
             recommendations=[],
-            based_on_items=len(cart.items)
+            based_on_items=len(valid_items)
         )
     
     # Get the most common SKUs (sorted by frequency, then limit)
@@ -653,5 +724,5 @@ def get_cart_recommendations(
     
     return RecommendationsResponse(
         recommendations=recommendations,
-        based_on_items=len(cart.items)
+        based_on_items=len(valid_items)
     )
