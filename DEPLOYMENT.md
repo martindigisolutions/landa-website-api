@@ -55,9 +55,9 @@ Respuesta esperada:
 
 ## ☁️ Despliegue en AWS App Runner
 
-### Opción A: Dockerfile desde GitHub (RECOMENDADA) ⭐
+### Opción A: Desde GitHub con Runtime Python (RECOMENDADA) ⭐
 
-App Runner construye la imagen directamente desde tu Dockerfile en el repositorio.
+La forma más simple. App Runner lee el `apprunner.yaml` y despliega automáticamente.
 
 1. **Ir a AWS App Runner Console**
    - https://console.aws.amazon.com/apprunner
@@ -68,29 +68,16 @@ App Runner construye la imagen directamente desde tu Dockerfile en el repositori
    - Branch: `main` (o tu branch de producción)
 
 3. **Configuración de Build**
-   - Configuration source: **"Configure all settings here"**
-   - Runtime: **"Dockerfile"** ← Selecciona esta opción
-   - Port: `8080`
+   - Configuration source: **"Use a configuration file"** ← App Runner lee `apprunner.yaml`
+   - (Alternativamente: "Configure all settings here" → Python 3.11 → `pip install -r requirements.txt` → `python main.py` → Port 8080)
 
 4. **Configurar variables de entorno** (ver sección abajo)
 
 5. **Crear servicio**
 
-App Runner detectará tu `Dockerfile` y construirá la imagen automáticamente en cada push.
+App Runner desplegará automáticamente en cada push a tu rama.
 
-### Opción B: Runtime Python (sin Docker)
-
-Si prefieres no usar Docker, App Runner puede instalar dependencias directamente:
-
-1. **Crear servicio** igual que arriba
-
-2. **Configuración de Build**
-   - Runtime: **Python 3.11**
-   - Build command: `pip install -r requirements.txt`
-   - Start command: `python main.py`
-   - Port: `8080`
-
-### Opción C: Imagen Docker desde ECR (manual)
+### Opción B: Imagen Docker desde ECR
 
 Para tener control total sobre la imagen que se despliega:
 
