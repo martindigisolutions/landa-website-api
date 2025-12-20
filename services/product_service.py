@@ -55,7 +55,8 @@ def _resolve_related_products(
                 sale_price=p.sale_price,
                 image_url=p.image_url,
                 is_in_stock=p.is_in_stock,
-                brand=p.brand
+                brand=p.brand,
+                has_variants=p.has_variants
             ))
     
     return result

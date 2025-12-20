@@ -76,6 +76,7 @@ class RelatedProductPublic(BaseModel):
     image_url: Optional[str] = None
     is_in_stock: Optional[bool] = None
     brand: Optional[str] = None
+    has_variants: Optional[bool] = None
 
     class Config:
         from_attributes = True
