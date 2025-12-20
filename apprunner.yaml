@@ -1,21 +1,12 @@
 version: 1.0
-runtime: python311
 
 # ============================================
-# App Runner Configuration
+# App Runner Configuration - Dockerfile Build
 # ============================================
-# In App Runner console:
-#   1. Source: "Source code repository" → Connect GitHub
-#   2. Build settings: "Use a configuration file"
-#   3. App Runner reads this file automatically
-
-build:
-  commands:
-    build:
-      - pip install --no-cache-dir -r requirements.txt
+# App Runner detectará el Dockerfile automáticamente
+# cuando no se especifica un runtime
 
 run:
-  command: python main.py
   network:
     port: 8080
   env:
@@ -25,12 +16,9 @@ run:
       value: "HS256"
     - name: LOG_LEVEL
       value: "info"
-  # Configure these secrets in App Runner console → Configuration → Environment variables:
-  # - DATABASE_URL (required)
-  # - SECRET_KEY (required)
-  # - ALLOWED_ORIGINS (required)
+  # Configure secrets in App Runner Console:
+  # - DATABASE_URL
+  # - SECRET_KEY
+  # - ALLOWED_ORIGINS
   # - STRIPE_SECRET_KEY
   # - STRIPE_WEBHOOK_SECRET
-  # - EMAIL_HOST, EMAIL_PORT, EMAIL_USERNAME, EMAIL_PASSWORD, EMAIL_FROM
-  # - FRONTEND_RESET_URL
-  # - ADMIN_CLIENT_ID, ADMIN_CLIENT_SECRET

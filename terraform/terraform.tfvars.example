@@ -1,0 +1,62 @@
+# ============================================
+# Terraform Variables - EXAMPLE
+# ============================================
+# Copy this file to terraform.tfvars and fill in your values
+# DO NOT commit terraform.tfvars to git!
+
+aws_region   = "us-east-1"
+aws_profile  = "dev-account"  # Perfil de AWS CLI a usar (ver: aws configure list-profiles)
+project_name = "landa-beauty"
+
+# ============================================
+# GitHub Configuration (REQUIRED)
+# ============================================
+# 1. Primero crea la conexión en AWS Console:
+#    AWS Console → App Runner → GitHub connections → Create connection
+# 2. Autoriza la conexión con GitHub
+# 3. Copia el ARN de la conexión aquí:
+
+github_connection_arn = "arn:aws:apprunner:us-east-1:123456789012:connection/github-connection/abc123def456"
+github_repository_url = "https://github.com/tu-usuario/landa-website-api"
+github_branch         = "main"
+auto_deploy           = true
+
+# ============================================
+# App Runner Configuration
+# ============================================
+cpu             = "1024"  # 1 vCPU
+memory          = "2048"  # 2 GB
+min_instances   = 1
+max_instances   = 5
+max_concurrency = 100
+log_level       = "info"
+
+# ============================================
+# Application Configuration
+# ============================================
+allowed_origins = "https://landabeautysupply.com,https://www.landabeautysupply.com"
+
+# ============================================
+# Secrets
+# ============================================
+# Opción 1: Usar SSM Parameter Store (recomendado)
+use_ssm_secrets = true
+
+# Si use_ssm_secrets = true, proporciona los valores aquí:
+database_url          = "postgresql://user:password@your-rds-endpoint:5432/landa_db"
+secret_key            = "your-super-secret-jwt-key-minimum-32-characters"
+stripe_secret_key     = "sk_test_YOUR_STRIPE_SECRET_KEY_HERE"
+stripe_webhook_secret = "whsec_YOUR_WEBHOOK_SECRET_HERE"
+
+# Opción 2: Configurar secrets manualmente en AWS Console
+# use_ssm_secrets = false
+# (luego agrega las variables de entorno en App Runner Console)
+
+# ============================================
+# Tags
+# ============================================
+tags = {
+  Project     = "landa-beauty-supply"
+  Environment = "production"
+  ManagedBy   = "terraform"
+}

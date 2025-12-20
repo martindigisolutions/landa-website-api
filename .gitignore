@@ -36,3 +36,11 @@ env/
 
 # macOS
 .DS_Store
+
+# Terraform
+terraform/.terraform/
+terraform/*.tfstate
+terraform/*.tfstate.*
+terraform/*.tfvars
+terraform/.terraform.lock.hcl
+!terraform/terraform.tfvars.example
