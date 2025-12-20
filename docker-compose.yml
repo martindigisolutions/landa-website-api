@@ -1,0 +1,49 @@
+# ============================================
+# Landa Beauty Supply API - Docker Compose
+# For local development and testing
+# ============================================
+
+version: '3.8'
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "${PORT:-8080}:${PORT:-8080}"
+    # Environment variables are loaded from --env-file flag
+    # The same file is used for both interpolation and container env
+    env_file:
+      - .env.dev
+    volumes:
+      # Mount local db for development (remove in production)
+      - ./api_db.sqlite3:/app/api_db.sqlite3
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:${PORT:-8080}/api/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+
+  # Optional: PostgreSQL for local testing with production-like setup
+  # Uncomment to use PostgreSQL instead of SQLite
+  # postgres:
+  #   image: postgres:15-alpine
+  #   environment:
+  #     - POSTGRES_USER=landa
+  #     - POSTGRES_PASSWORD=landa_password
+  #     - POSTGRES_DB=landa_db
+  #   ports:
+  #     - "5432:5432"
+  #   volumes:
+  #     - postgres_data:/var/lib/postgresql/data
+  #   healthcheck:
+  #     test: ["CMD-SHELL", "pg_isready -U landa"]
+  #     interval: 10s
+  #     timeout: 5s
+  #     retries: 5
+
+# volumes:
+#   postgres_data:

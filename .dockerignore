@@ -1,0 +1,76 @@
+# Git
+.git
+.gitignore
+.gitattributes
+
+# Python
+__pycache__
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv
+venv
+env
+.env*
+*.egg-info
+.eggs
+*.egg
+pip-log.txt
+pip-delete-this-directory.txt
+
+# IDE
+.idea
+.vscode
+*.swp
+*.swo
+.cursor
+
+# Testing
+.pytest_cache
+.coverage
+htmlcov
+.tox
+.nox
+
+# Documentation (keep for reference but not needed in container)
+# docs/
+
+# Local database files (should NOT be included in production)
+*.sqlite3
+*.db
+
+# Backup files
+*.bak
+*backup*
+*copia*
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# Build artifacts
+build/
+dist/
+
+# Alembic versions (migrations should run separately)
+# alembic/versions/
+
+# Development files
+t.py
+view/
+colores_categorias.json
+
+# Docker
+Dockerfile
+docker-compose*.yml
+.dockerignore
