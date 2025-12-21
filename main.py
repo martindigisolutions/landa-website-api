@@ -1,15 +1,25 @@
 import os
 import sys
 import traceback
+import logging
 from contextlib import asynccontextmanager
+
+# Configure logging for CloudWatch
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger("landa-api")
 
 print("🚀 Starting Landa Beauty Supply API...")
 print(f"Python version: {sys.version}")
 print(f"DATABASE_URL set: {bool(os.getenv('DATABASE_URL'))}")
 
 try:
-    from fastapi import FastAPI
+    from fastapi import FastAPI, Request
     from fastapi.middleware.cors import CORSMiddleware
+    from fastapi.responses import JSONResponse
+    from fastapi.exceptions import RequestValidationError
     print("✅ FastAPI imported")
 except Exception as e:
     print(f"❌ Error importing FastAPI: {e}")
@@ -125,6 +135,34 @@ app = FastAPI(
     version="1.0.2",
     lifespan=lifespan
 )
+
+
+# Exception handlers for detailed logging
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    """Log validation errors with full details"""
+    logger.error(f"Validation error on {request.method} {request.url.path}")
+    logger.error(f"Headers: {dict(request.headers)}")
+    logger.error(f"Validation errors: {exc.errors()}")
+    
+    return JSONResponse(
+        status_code=422,
+        content={"detail": exc.errors()}
+    )
+
+
+@app.exception_handler(Exception)
+async def general_exception_handler(request: Request, exc: Exception):
+    """Log unexpected errors with full details"""
+    logger.error(f"Unexpected error on {request.method} {request.url.path}")
+    logger.error(f"Error type: {type(exc).__name__}")
+    logger.error(f"Error message: {str(exc)}")
+    logger.error(f"Traceback: {traceback.format_exc()}")
+    
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "Internal server error"}
+    )
 
 
 @app.get("/api/health", tags=["Health"])

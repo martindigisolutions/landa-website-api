@@ -1,3 +1,4 @@
+import logging
 from fastapi import APIRouter, Depends, Header, HTTPException
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
@@ -8,6 +9,8 @@ from models import User
 from config import SECRET_KEY, ALGORITHM
 from services import checkout_service
 from services import shipping_service
+
+logger = logging.getLogger("landa-api.checkout")
 from schemas.checkout import (
     CheckoutSessionCreate, 
     CheckoutOptionsRequest, 
@@ -91,7 +94,10 @@ def start_checkout(
     - `out_of_stock`: Product/variant is out of stock
     - `insufficient_stock`: Requested quantity exceeds available stock
     """
+    logger.info(f"POST /checkout/ - session_id: {session_id}, user: {user.id if user else None}")
+    
     if not session_id and not user:
+        logger.warning("Checkout failed: Missing X-Session-ID header for guest user")
         raise HTTPException(
             status_code=400,
             detail="X-Session-ID header is required for guest users"
