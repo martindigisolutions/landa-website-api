@@ -1,3 +1,4 @@
+import logging
 from sqlalchemy.orm import Session
 from fastapi import HTTPException
 from models import Product, ProductVariant, Order, OrderItem, Cart, CartItem, User
@@ -8,17 +9,29 @@ from schemas.checkout import (
 from uuid import uuid4
 from typing import Optional, List, Tuple
 
+logger = logging.getLogger("landa-api.checkout")
+
 
 def _get_cart(db: Session, session_id: Optional[str], user_id: Optional[int]) -> Optional[Cart]:
-    """Get cart by user_id or session_id"""
+    """
+    Get cart by user_id or session_id.
+    Priority: user_id first, then fallback to session_id.
+    This handles the case where a guest adds items, then logs in without merging.
+    """
+    cart = None
+    
+    # Try to find by user_id first
     if user_id:
-        return db.query(Cart).filter(Cart.user_id == user_id).first()
-    if session_id:
-        return db.query(Cart).filter(
+        cart = db.query(Cart).filter(Cart.user_id == user_id).first()
+    
+    # If no user cart found, try session_id (for logged-in users with unmerged guest carts)
+    if not cart and session_id:
+        cart = db.query(Cart).filter(
             Cart.session_id == session_id,
             Cart.user_id == None
         ).first()
-    return None
+    
+    return cart
 
 
 def _get_item_price(product: Product, variant: Optional[ProductVariant]) -> float:
@@ -137,10 +150,15 @@ def start_checkout_session(
     """
     user_id = user.id if user else None
     
+    logger.info(f"start_checkout_session - session_id: {session_id}, user_id: {user_id}")
+    
     # Get cart from server
     cart = _get_cart(db, session_id, user_id)
     
+    logger.info(f"Cart found: {cart is not None}, items count: {len(cart.items) if cart else 0}")
+    
     if not cart or not cart.items:
+        logger.warning(f"Cart is empty or not found for user_id={user_id}, session_id={session_id}")
         raise HTTPException(
             status_code=400, 
             detail="Cart is empty"
