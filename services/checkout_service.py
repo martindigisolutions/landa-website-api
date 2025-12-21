@@ -354,7 +354,12 @@ def confirm_manual_payment(data: ConfirmManualPayment, db: Session):
     return {"status": "awaiting_verification"}
 
 def get_payment_details(order_id: str, db: Session):
-    order = db.query(Order).filter(Order.id == order_id).first()
+    try:
+        order_id_int = int(order_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid order ID format")
+    
+    order = db.query(Order).filter(Order.id == order_id_int).first()
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
 
