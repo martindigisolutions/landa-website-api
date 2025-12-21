@@ -27,6 +27,20 @@ provider "aws" {
 }
 
 # ============================================
+# Data Sources - Use Default VPC
+# ============================================
+data "aws_vpc" "default" {
+  default = true
+}
+
+data "aws_subnets" "default" {
+  filter {
+    name   = "vpc-id"
+    values = [data.aws_vpc.default.id]
+  }
+}
+
+# ============================================
 # App Runner Module
 # ============================================
 module "apprunner" {
@@ -45,8 +59,47 @@ module "apprunner" {
   log_level       = var.log_level
   allowed_origins = var.allowed_origins
 
-  # Extra env vars (secrets should be added manually in App Runner console)
-  extra_env_vars = {}
+  # Pass DATABASE_URL to App Runner
+  extra_env_vars = var.create_rds ? {
+    DATABASE_URL = module.rds[0].database_url
+  } : {}
+
+  tags = merge(var.tags, {
+    Environment = "prod"
+  })
+}
+
+# ============================================
+# RDS PostgreSQL Module (Optional)
+# ============================================
+module "rds" {
+  source = "../../modules/rds"
+  count  = var.create_rds ? 1 : 0
+
+  project_name = var.project_name
+  environment  = "prod"
+
+  # Network - Use default VPC
+  vpc_id              = data.aws_vpc.default.id
+  subnet_ids          = data.aws_subnets.default.ids
+  allowed_cidr_blocks = ["0.0.0.0/0"]  # App Runner doesn't have fixed IP
+  publicly_accessible = true
+
+  # Instance - Larger for production
+  instance_class        = var.rds_instance_class
+  allocated_storage     = 50
+  max_allocated_storage = 200
+
+  # Database
+  db_name     = var.db_name
+  db_username = var.db_username
+  db_password = var.db_password
+
+  # Production settings
+  multi_az                = var.rds_multi_az
+  deletion_protection     = true
+  skip_final_snapshot     = false
+  backup_retention_period = 7
 
   tags = merge(var.tags, {
     Environment = "prod"
@@ -99,6 +152,39 @@ variable "tags" {
   }
 }
 
+# RDS Variables
+variable "create_rds" {
+  description = "Whether to create RDS instance"
+  type        = bool
+  default     = false
+}
+
+variable "rds_instance_class" {
+  description = "RDS instance class for production"
+  default     = "db.t3.small"
+}
+
+variable "rds_multi_az" {
+  description = "Enable Multi-AZ for high availability"
+  type        = bool
+  default     = false
+}
+
+variable "db_name" {
+  default = "landa_prod"
+}
+
+variable "db_username" {
+  default = "landa_admin"
+}
+
+variable "db_password" {
+  description = "Database password"
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
 # ============================================
 # Outputs
 # ============================================
@@ -112,4 +198,16 @@ output "ecr_repository_url" {
 
 output "ecr_login_command" {
   value = "aws ecr get-login-password --region ${var.aws_region} --profile ${var.aws_profile} | docker login --username AWS --password-stdin ${module.apprunner.ecr_repository_url}"
+}
+
+# RDS Outputs (only when created)
+output "rds_endpoint" {
+  value       = var.create_rds ? module.rds[0].endpoint : null
+  description = "RDS endpoint"
+}
+
+output "rds_database_url" {
+  value       = var.create_rds ? module.rds[0].database_url : null
+  sensitive   = true
+  description = "Full database connection URL"
 }

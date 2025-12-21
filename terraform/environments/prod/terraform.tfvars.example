@@ -1,0 +1,31 @@
+# ============================================
+# PROD Environment Variables
+# ============================================
+# Copy this file to terraform.tfvars and fill in your values
+# DO NOT commit terraform.tfvars to git!
+
+# ============================================
+# RDS Configuration
+# ============================================
+# Set to true to create RDS PostgreSQL instance
+create_rds = true
+
+# Database credentials (CHANGE THESE!)
+db_name     = "landa_prod"
+db_username = "landa_admin"
+db_password = "YourVerySecureProductionPassword123!"  # Use a VERY strong password!
+
+# Production RDS settings
+rds_instance_class = "db.t3.small"   # Options: db.t3.micro, db.t3.small, db.t3.medium
+rds_multi_az       = false           # Set to true for high availability (~2x cost)
+
+# ============================================
+# Optional Overrides
+# ============================================
+# aws_region    = "us-west-2"
+# aws_profile   = "default"
+# project_name  = "landa-beauty-api"
+# cpu           = "1024"
+# memory        = "2048"
+# min_instances = 1
+# max_instances = 10

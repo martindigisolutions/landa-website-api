@@ -1,0 +1,27 @@
+# ============================================
+# DEV Environment Variables
+# ============================================
+# Copy this file to terraform.tfvars and fill in your values
+# DO NOT commit terraform.tfvars to git!
+
+# ============================================
+# RDS Configuration
+# ============================================
+# Set to true to create RDS PostgreSQL instance
+create_rds = true
+
+# Database credentials (CHANGE THESE!)
+db_name     = "landa_dev"
+db_username = "landa_admin"
+db_password = "YourSecurePassword123!"  # Use a strong password!
+
+# ============================================
+# Optional Overrides
+# ============================================
+# aws_region    = "us-west-2"
+# aws_profile   = "dev-account"
+# project_name  = "landa-beauty-api-dev"
+# cpu           = "1024"
+# memory        = "2048"
+# min_instances = 1
+# max_instances = 3
