@@ -20,6 +20,31 @@ from schemas.product import (
 from utils.language import localize_field, localize_gallery
 
 
+def _get_min_variant_prices(product: Product) -> tuple[float | None, float | None]:
+    """
+    Get the minimum regular_price and sale_price from all variants.
+    Returns (min_regular_price, min_sale_price)
+    """
+    if not product.has_variants or not product.variant_groups:
+        return product.regular_price, product.sale_price
+    
+    all_regular_prices = []
+    all_sale_prices = []
+    
+    for group in product.variant_groups:
+        for variant in group.variants:
+            if getattr(variant, 'active', True):  # Only active variants
+                if variant.regular_price is not None:
+                    all_regular_prices.append(variant.regular_price)
+                if variant.sale_price is not None:
+                    all_sale_prices.append(variant.sale_price)
+    
+    min_regular = min(all_regular_prices) if all_regular_prices else product.regular_price
+    min_sale = min(all_sale_prices) if all_sale_prices else product.sale_price
+    
+    return min_regular, min_sale
+
+
 def _resolve_related_products(
     skus: list, 
     db: Session, 
@@ -47,12 +72,14 @@ def _resolve_related_products(
     for sku in skus:
         if sku in products_by_sku:
             p = products_by_sku[sku]
+            # Get min prices from variants if available
+            min_regular, min_sale = _get_min_variant_prices(p)
             result.append(RelatedProductPublic(
                 id=p.id,
                 seller_sku=p.seller_sku,
                 name=localize_field(p.name, p.name_en, lang),
-                regular_price=p.regular_price,
-                sale_price=p.sale_price,
+                regular_price=min_regular,
+                sale_price=min_sale,
                 image_url=p.image_url,
                 is_in_stock=p.is_in_stock,
                 brand=p.brand,
@@ -100,6 +127,9 @@ def get_categories(db: Session, lang: str = "es") -> List[CategoryGroupPublic]:
 def _product_to_public(product: Product, lang: str = "es", db: Session = None) -> ProductPublic:
     """Convert product model to localized public response with grouped variants"""
     variant_types = []
+    
+    # Calculate min prices from variants (if product has variants)
+    min_regular_price, min_sale_price = _get_min_variant_prices(product)
     
     if product.has_variants and product.variant_groups:
         # Group by variant_type
@@ -195,8 +225,8 @@ def _product_to_public(product: Product, lang: str = "es", db: Session = None) -
         short_description=localize_field(product.short_description, product.short_description_en, lang),
         description=localize_field(product.description, product.description_en, lang),
         tags=localize_field(product.tags, product.tags_en, lang),
-        regular_price=product.regular_price,
-        sale_price=product.sale_price,
+        regular_price=min_regular_price,  # Use min from variants if available
+        sale_price=min_sale_price,  # Use min from variants if available
         stock=product.stock,
         is_in_stock=product.is_in_stock,
         restock_date=product.restock_date,
