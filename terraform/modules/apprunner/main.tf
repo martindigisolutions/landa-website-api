@@ -1,23 +1,7 @@
 # ============================================
-# Landa Beauty Supply API - AWS App Runner
-# Terraform Configuration (ECR + Docker)
+# App Runner Module
+# Reusable module for ECR + App Runner deployment
 # ============================================
-
-terraform {
-  required_version = ">= 1.0"
-  
-  required_providers {
-    aws = {
-      source  = "hashicorp/aws"
-      version = "~> 5.0"
-    }
-  }
-}
-
-provider "aws" {
-  region  = var.aws_region
-  profile = var.aws_profile
-}
 
 # ============================================
 # ECR Repository
@@ -32,6 +16,28 @@ resource "aws_ecr_repository" "api" {
   }
 
   tags = var.tags
+}
+
+# ECR Lifecycle Policy - Keep last 5 images
+resource "aws_ecr_lifecycle_policy" "api" {
+  repository = aws_ecr_repository.api.name
+
+  policy = jsonencode({
+    rules = [
+      {
+        rulePriority = 1
+        description  = "Keep last 5 images"
+        selection = {
+          tagStatus   = "any"
+          countType   = "imageCountMoreThan"
+          countNumber = 5
+        }
+        action = {
+          type = "expire"
+        }
+      }
+    ]
+  })
 }
 
 # ============================================
@@ -98,12 +104,16 @@ resource "aws_apprunner_service" "api" {
       image_configuration {
         port = "8080"
 
-        runtime_environment_variables = {
-          PORT            = "8080"
-          ALGORITHM       = "HS256"
-          LOG_LEVEL       = var.log_level
-          ALLOWED_ORIGINS = var.allowed_origins
-        }
+        runtime_environment_variables = merge(
+          {
+            PORT            = "8080"
+            ALGORITHM       = "HS256"
+            LOG_LEVEL       = var.log_level
+            ALLOWED_ORIGINS = var.allowed_origins
+            ENVIRONMENT     = var.environment
+          },
+          var.extra_env_vars
+        )
       }
 
       image_identifier      = "${aws_ecr_repository.api.repository_url}:latest"
@@ -114,8 +124,9 @@ resource "aws_apprunner_service" "api" {
   }
 
   instance_configuration {
-    cpu    = var.cpu
-    memory = var.memory
+    cpu               = var.cpu
+    memory            = var.memory
+    instance_role_arn = aws_iam_role.apprunner_instance.arn
   }
 
   auto_scaling_configuration_arn = aws_apprunner_auto_scaling_configuration_version.api.arn
@@ -138,7 +149,7 @@ resource "aws_apprunner_service" "api" {
 # Auto Scaling Configuration
 # ============================================
 resource "aws_apprunner_auto_scaling_configuration_version" "api" {
-  auto_scaling_configuration_name = "landa-api-autoscale"
+  auto_scaling_configuration_name = "${var.project_name}-autoscale"
 
   min_size        = var.min_instances
   max_size        = var.max_instances

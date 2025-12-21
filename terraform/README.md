@@ -1,165 +1,167 @@
-# 🚀 Terraform - AWS App Runner (desde GitHub)
+# Terraform - AWS App Runner Infrastructure
 
-Configuración de Terraform para desplegar la API directamente desde GitHub a AWS App Runner.
+Este directorio contiene la infraestructura como código para desplegar la API en AWS App Runner.
 
-## 📋 Prerequisitos
-
-- [Terraform](https://www.terraform.io/downloads) >= 1.0
-- [AWS CLI](https://aws.amazon.com/cli/) configurado con credenciales
-- Repositorio en GitHub
-
-## 🏗️ Arquitectura
+## 📁 Estructura
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                         AWS                                  │
-│                                                              │
-│  ┌─────────────┐         ┌─────────────────┐                │
-│  │   GitHub    │────────▶│   App Runner    │                │
-│  │ (tu código) │  push   │   (API)         │                │
-│  └─────────────┘         └────────┬────────┘                │
-│                                   │                          │
-│                    ┌──────────────┼──────────────┐          │
-│                    ▼              ▼              ▼          │
-│              ┌──────────┐  ┌───────────┐  ┌──────────┐     │
-│              │   SSM    │  │    RDS    │  │  Stripe  │     │
-│              │ (secrets)│  │(PostgreSQL)│  │  (API)   │     │
-│              └──────────┘  └───────────┘  └──────────┘     │
-└─────────────────────────────────────────────────────────────┘
+terraform/
+├── modules/
+│   └── apprunner/           # Módulo reutilizable
+│       ├── main.tf
+│       ├── variables.tf
+│       └── outputs.tf
+├── environments/
+│   ├── dev/                 # Configuración de desarrollo
+│   │   └── main.tf
+│   └── prod/                # Configuración de producción
+│       └── main.tf
+└── README.md
 ```
 
-## 🚀 Despliegue
+## 🌍 Ambientes
 
-### Paso 1: Crear conexión de GitHub en AWS
+| Ambiente | AWS Account | Rama Git | ECR Repository |
+|----------|-------------|----------|----------------|
+| Dev | 775681068353 | `dev` | landa-beauty-api-dev-api |
+| Prod | 553938786984 | `main` | landa-beauty-api-api |
 
-**IMPORTANTE**: Esto debe hacerse ANTES de ejecutar Terraform.
+## 🚀 Despliegue Inicial
 
-1. Ve a **AWS Console** → **App Runner** → **GitHub connections**
-2. Click **"Create connection"**
-3. Nombre: `github-connection` (o el que prefieras)
-4. Click **"Install another"** para autorizar GitHub
-5. Selecciona tu cuenta/organización de GitHub
-6. **Copia el ARN** de la conexión (lo necesitarás)
+### 1. Prerequisitos
 
-### Paso 2: Configurar variables
+- Terraform >= 1.0
+- AWS CLI configurado con perfiles `dev-account` y `default`
+- Docker instalado
+
+### 2. Desplegar Dev
 
 ```bash
-cd terraform
-cp terraform.tfvars.example terraform.tfvars
-```
-
-Edita `terraform.tfvars`:
-
-```hcl
-# Pega el ARN de la conexión de GitHub
-github_connection_arn = "arn:aws:apprunner:us-east-1:123456789:connection/github-connection/abc123"
-github_repository_url = "https://github.com/tu-usuario/landa-website-api"
-github_branch         = "main"
-
-# Tus secrets
-database_url = "postgresql://user:pass@host:5432/db"
-secret_key   = "tu-clave-secreta-jwt"
-# ... etc
-```
-
-### Paso 3: Ejecutar Terraform
-
-```bash
-# Inicializar
+cd terraform/environments/dev
 terraform init
-
-# Ver plan
 terraform plan
-
-# Aplicar
 terraform apply
 ```
 
-### Paso 4: Verificar
+### 3. Desplegar Prod
 
 ```bash
-# Obtener URL
-terraform output app_runner_url
-
-# Probar health check
-curl $(terraform output -raw health_check_url)
+cd terraform/environments/prod
+terraform init
+terraform plan
+terraform apply
 ```
 
-## 📦 Recursos Creados
+### 4. Push Inicial de Docker Image
 
-| Recurso | Descripción |
-|---------|-------------|
-| `aws_apprunner_service` | Servicio de App Runner conectado a GitHub |
-| `aws_apprunner_auto_scaling_configuration_version` | Configuración de auto-scaling |
-| `aws_iam_role` | Rol IAM para acceso a SSM |
-| `aws_ssm_parameter` (x4) | Secrets en SSM Parameter Store |
-
-## 🔄 Despliegues Automáticos
-
-Con `auto_deploy = true` (por defecto), cada push a la rama configurada desplegará automáticamente.
+Después del `terraform apply`, necesitas subir la primera imagen:
 
 ```bash
-# Desde tu máquina local
-git add .
-git commit -m "Nueva feature"
-git push origin main
+# Para Dev
+cd ../../..  # volver a la raíz del proyecto
 
-# App Runner detecta el push y despliega automáticamente 🚀
+# Login a ECR
+aws ecr get-login-password --region us-west-2 --profile dev-account | docker login --username AWS --password-stdin 775681068353.dkr.ecr.us-west-2.amazonaws.com
+
+# Build y push
+docker build -t landa-api .
+docker tag landa-api:latest 775681068353.dkr.ecr.us-west-2.amazonaws.com/landa-beauty-api-dev-api:latest
+docker push 775681068353.dkr.ecr.us-west-2.amazonaws.com/landa-beauty-api-dev-api:latest
 ```
 
-## 🔐 Manejo de Secrets
+Para Prod (usa profile default y account 553938786984).
 
-### Opción 1: SSM Parameter Store (Recomendado)
+## 🔄 CI/CD Automático
 
-```hcl
-use_ssm_secrets = true
-database_url    = "postgresql://..."
-secret_key      = "..."
+Una vez configurado GitHub Actions, los deploys son automáticos:
+
+```
+Push a rama 'dev'  → Build → ECR Dev  → App Runner Dev  auto-deploy
+Push a rama 'main' → Build → ECR Prod → App Runner Prod auto-deploy
 ```
 
-Los secrets se guardan encriptados en SSM y App Runner los lee automáticamente.
+### Configurar GitHub Secrets
 
-### Opción 2: Variables directas en App Runner Console
+Ve a: GitHub → Settings → Secrets and variables → Actions → New repository secret
 
-```hcl
-use_ssm_secrets = false
+**Secrets para Dev:**
+| Secret | Valor |
+|--------|-------|
+| `DEV_AWS_ACCOUNT_ID` | `775681068353` |
+| `DEV_AWS_ACCESS_KEY_ID` | Tu access key de dev |
+| `DEV_AWS_SECRET_ACCESS_KEY` | Tu secret key de dev |
+| `DEV_ECR_REPOSITORY` | `landa-beauty-api-dev-api` |
+
+**Secrets para Prod:**
+| Secret | Valor |
+|--------|-------|
+| `PROD_AWS_ACCOUNT_ID` | `553938786984` |
+| `PROD_AWS_ACCESS_KEY_ID` | Tu access key de prod |
+| `PROD_AWS_SECRET_ACCESS_KEY` | Tu secret key de prod |
+| `PROD_ECR_REPOSITORY` | `landa-beauty-api-api` |
+
+### Crear IAM User para GitHub Actions
+
+En cada cuenta AWS, crea un usuario IAM con estos permisos:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "ecr:GetAuthorizationToken"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "ecr:BatchCheckLayerAvailability",
+        "ecr:GetDownloadUrlForLayer",
+        "ecr:BatchGetImage",
+        "ecr:PutImage",
+        "ecr:InitiateLayerUpload",
+        "ecr:UploadLayerPart",
+        "ecr:CompleteLayerUpload"
+      ],
+      "Resource": "arn:aws:ecr:us-west-2:*:repository/landa-beauty-api*"
+    }
+  ]
+}
 ```
 
-Luego configura las variables manualmente en AWS Console → App Runner → Tu servicio → Configuration.
+## 🔧 Configuración de Variables de Entorno
 
-## 🗑️ Destruir
+Las variables de entorno sensibles (DATABASE_URL, SECRET_KEY, etc.) se configuran manualmente en la consola de App Runner:
+
+1. Ve a AWS Console → App Runner → Tu servicio
+2. Click en "Configuration"
+3. En "Environment variables", agrega:
+   - `DATABASE_URL`
+   - `SECRET_KEY`
+   - `STRIPE_SECRET_KEY`
+   - `STRIPE_WEBHOOK_SECRET`
+
+## 📊 Monitoreo
 
 ```bash
+# Ver estado del servicio (dev)
+aws apprunner list-services --profile dev-account --region us-west-2
+
+# Ver logs
+aws apprunner list-operations --service-arn <ARN> --profile dev-account --region us-west-2
+```
+
+## 🗑️ Destruir Infraestructura
+
+```bash
+# Dev
+cd terraform/environments/dev
+terraform destroy
+
+# Prod
+cd terraform/environments/prod
 terraform destroy
 ```
-
-## 💡 Comandos Útiles
-
-```bash
-# Ver outputs
-terraform output
-
-# Ver URL de la API
-terraform output app_runner_url
-
-# Ver estado
-terraform show
-
-# Actualizar sin recrear
-terraform apply -auto-approve
-```
-
-## 📊 Costos Estimados
-
-| Servicio | Costo Aproximado |
-|----------|------------------|
-| App Runner | ~$25-50/mes (1 vCPU, 2GB, tráfico bajo) |
-| SSM Parameters | Gratis (hasta 10,000) |
-| **Total** | **~$25-50/mes** |
-
-## ⚠️ Notas
-
-1. La conexión de GitHub debe crearse manualmente primero
-2. El primer despliegue toma ~5 minutos
-3. Los secrets en `terraform.tfvars` nunca deben subirse a git
-4. Para múltiples ambientes, usa workspaces: `terraform workspace new staging`
