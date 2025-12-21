@@ -122,7 +122,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Landa Beauty Supply API",
     description="API for Landa Beauty Supply e-commerce platform",
-    version="1.0.1",
+    version="1.0.2",
     lifespan=lifespan
 )
 
@@ -135,7 +135,7 @@ def health_check():
         "data": {
             "status": "healthy",
             "service": "Landa Beauty Supply API",
-            "version": "1.0.1"
+            "version": "1.0.2"
         }
     }
 
