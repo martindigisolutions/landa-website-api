@@ -27,7 +27,7 @@ from schemas.checkout import (
 )
 from typing import List, Optional
 
-router = APIRouter(prefix="/checkout", tags=["Checkout"])
+router = APIRouter(prefix="/checkout", tags=["Checkout"], redirect_slashes=False)
 
 # Optional OAuth2 scheme (doesn't auto-raise 401)
 oauth2_scheme_optional = OAuth2PasswordBearer(tokenUrl="/login", auto_error=False)
@@ -67,7 +67,7 @@ def get_optional_user(
     except JWTError:
         return None
 
-@router.post("/", response_model=CheckoutValidationResponse, summary="Iniciar sesión de checkout")
+@router.post("", response_model=CheckoutValidationResponse, summary="Iniciar sesión de checkout")
 def start_checkout(
     data: CheckoutSessionCreate,
     session_id: Optional[str] = Depends(get_session_id),
