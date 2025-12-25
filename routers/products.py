@@ -52,6 +52,10 @@ def get_categories(
       Use multiple `category` parameters to filter by multiple categories: `?category=tintes&category=shampoos`
     - `category_group`: Filter by category group slug (e.g., "tipo-de-producto")
     
+    **Similar Products Filter:**
+    - `similar_to`: Get products that are similar to a specific product (by seller_sku or product ID).
+      Returns only products listed in the `similar_products` field of that product.
+    
     **Sort Options:**
     - `name`: Sort alphabetically by name (default)
     - `price_asc`: Sort by price ascending
@@ -73,6 +77,7 @@ def get_products(
     max_price: Optional[float] = Query(None, description="Maximum price filter"),
     category: Optional[List[str]] = Query(None, description="Filter by category slug(s). Can be repeated for multiple categories."),
     category_group: Optional[str] = Query(None, description="Filter by category group slug"),
+    similar_to: Optional[str] = Query(None, description="Get similar products for this product (seller_sku or product ID)"),
     sort_by: Optional[str] = Query("name", description="Sort by: name, price_asc, price_desc, newest, bestseller, recommended"),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100)
@@ -88,6 +93,7 @@ def get_products(
         max_price=max_price,
         category=category,
         category_group=category_group,
+        similar_to=similar_to,
         page=page,
         page_size=page_size,
         sort_by=sort_by
