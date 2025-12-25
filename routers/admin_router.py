@@ -4,6 +4,7 @@ from typing import Optional, List
 
 from database import get_db
 from services import admin_service
+from services.settings_service import SettingsService, get_settings_service
 from schemas.admin import (
     ApplicationCreate, ApplicationUpdate, ApplicationResponse, ApplicationCreatedResponse,
     ProductCreate, ProductUpdate, ProductAdminResponse,
@@ -28,6 +29,10 @@ from schemas.admin import (
     InventoryListResponse, InventoryUnifiedUpdate, InventoryUnifiedUpdateResponse
 )
 from schemas.product import ProductSchema
+from schemas.settings import (
+    SettingResponse, SettingUpdate, SettingsListResponse,
+    BulkSettingsUpdate, BulkSettingsResponse
+)
 
 router = APIRouter(prefix="/admin", tags=["Admin"])
 
@@ -821,4 +826,121 @@ def update_inventory_unified(
     db: Session = Depends(get_db)
 ):
     return admin_service.update_inventory_unified(data, db)
+
+
+# ==================== STORE SETTINGS MANAGEMENT ====================
+# These endpoints require settings:read or settings:write scope
+
+@router.get(
+    "/settings",
+    response_model=SettingsListResponse,
+    summary="Get all store settings",
+    description="""Get all store configuration settings.
+    
+    Settings include:
+    - Store address (for tax calculation on pickup orders)
+    - Tax configuration (method, rates, etc.)
+    - Order limits (min/max order amounts)
+    """
+)
+def get_all_settings(
+    app=Depends(admin_service.require_scope("settings:read")),
+    db: Session = Depends(get_db)
+):
+    service = get_settings_service(db)
+    settings = service.get_all_settings()
+    return {"settings": settings}
+
+
+@router.get(
+    "/settings/{key}",
+    response_model=SettingResponse,
+    summary="Get a single setting",
+    description="Get a specific setting by its key."
+)
+def get_setting(
+    key: str,
+    app=Depends(admin_service.require_scope("settings:read")),
+    db: Session = Depends(get_db)
+):
+    from fastapi import HTTPException
+    service = get_settings_service(db)
+    setting = service.get_setting(key)
+    if not setting:
+        raise HTTPException(status_code=404, detail=f"Setting '{key}' not found")
+    return setting
+
+
+@router.put(
+    "/settings/{key}",
+    response_model=SettingResponse,
+    summary="Update a single setting",
+    description="Update the value of a specific setting."
+)
+def update_setting(
+    key: str,
+    data: SettingUpdate,
+    app=Depends(admin_service.require_scope("settings:write")),
+    db: Session = Depends(get_db)
+):
+    from fastapi import HTTPException
+    service = get_settings_service(db)
+    setting = service.update_setting(key, data.value)
+    if not setting:
+        raise HTTPException(status_code=404, detail=f"Setting '{key}' not found")
+    return setting
+
+
+@router.put(
+    "/settings",
+    response_model=BulkSettingsResponse,
+    summary="Bulk update settings",
+    description="""Update multiple settings at once.
+    
+    **Example:**
+    ```json
+    {
+      "settings": [
+        {"key": "store_city", "value": "Albuquerque"},
+        {"key": "store_state", "value": "NM"},
+        {"key": "min_order_amount", "value": "50"}
+      ]
+    }
+    ```
+    """
+)
+def bulk_update_settings(
+    data: BulkSettingsUpdate,
+    app=Depends(admin_service.require_scope("settings:write")),
+    db: Session = Depends(get_db)
+):
+    service = get_settings_service(db)
+    updated_count = service.update_settings_bulk(data.settings)
+    return {
+        "success": True,
+        "message": f"Successfully updated {updated_count} settings",
+        "updated_count": updated_count
+    }
+
+
+@router.post(
+    "/settings/seed",
+    response_model=BulkSettingsResponse,
+    summary="Seed default settings",
+    description="""Initialize default settings if they don't exist.
+    
+    This is useful for first-time setup. Existing settings are not overwritten.
+    """
+)
+def seed_default_settings(
+    app=Depends(admin_service.require_scope("settings:write")),
+    db: Session = Depends(get_db)
+):
+    service = get_settings_service(db)
+    created_count = service.seed_default_settings()
+    return {
+        "success": True,
+        "message": f"Created {created_count} default settings",
+        "updated_count": created_count
+    }
 

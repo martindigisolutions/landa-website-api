@@ -126,6 +126,7 @@ class ProductVariant(Base):
     image_url = Column(String, nullable=True)  # Variant-specific image
     display_order = Column(Integer, default=0)  # For sorting variants
     active = Column(Boolean, default=True)  # Soft delete without removing
+    weight_lbs = Column(Float, nullable=True)  # Weight in pounds (overrides product weight if set)
     
     group = relationship("ProductVariantGroup", back_populates="variants")
 
@@ -374,3 +375,33 @@ class CartItem(Base):
     cart = relationship("Cart", back_populates="items")
     product = relationship("Product")
     variant = relationship("ProductVariant")
+
+
+# ==================== STORE SETTINGS ====================
+
+class StoreSettings(Base):
+    """
+    Store-wide configuration settings.
+    Uses key-value pattern for flexibility.
+    Only one row per key should exist (enforced by unique constraint).
+    """
+    __tablename__ = "store_settings"
+
+    id = Column(Integer, primary_key=True, index=True)
+    key = Column(String, unique=True, index=True, nullable=False)
+    value = Column(String, nullable=True)  # Stored as string, parsed based on value_type
+    value_type = Column(String, default="string")  # "string", "number", "boolean", "json"
+    description = Column(String, nullable=True)  # Human-readable description
+    
+    # Timestamps
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+# Default settings keys (for reference)
+# - min_order_amount: Minimum order amount to checkout (number)
+# - max_order_amount: Maximum order amount allowed (number)
+# - tax_rate: Tax rate percentage (number, e.g., 8.25 for 8.25%)
+# - enable_taxes: Whether taxes are enabled (boolean)
+# - free_shipping_threshold: Amount for free shipping (number)
+# - shipping_incentive_threshold: % of rule to show incentive (number, default 80)

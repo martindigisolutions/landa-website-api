@@ -13,3 +13,4 @@ python-dotenv
 stripe
 pg8000
 aiosqlite
+httpx

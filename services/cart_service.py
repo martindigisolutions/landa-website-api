@@ -13,8 +13,13 @@ from schemas.cart import (
     CartProductInfo, CartVariantInfo, CartSummary,
     AddItemResponse, UpdateItemResponse, DeleteItemResponse,
     ClearCartResponse, MergeCartResponse, StockWarning,
-    RecommendedProduct, RecommendationsResponse
+    RecommendedProduct, RecommendationsResponse, ShippingIncentive
 )
+from services.settings_service import SettingsService
+from services.tax_service import TaxService
+from services.shipping_service import calculate_shipping_cost, get_shipping_incentive
+from schemas.settings import TaxAddress
+from utils.language import localize_field
 
 # Expiration times
 GUEST_CART_EXPIRY_DAYS = 30
@@ -58,12 +63,15 @@ def _check_stock_status(quantity: int, available_stock: int, is_in_stock: bool) 
     return "available"
 
 
-def _build_product_info(product: Product) -> CartProductInfo:
+def _build_product_info(product: Product, lang: str = "es") -> CartProductInfo:
     """Build product info for cart response"""
+    # Localize name based on language
+    name = localize_field(product.name, getattr(product, 'name_en', None), lang)
+    
     return CartProductInfo(
         id=product.id,
         seller_sku=product.seller_sku,
-        name=product.name,
+        name=name or product.name,
         image_url=product.image_url,
         regular_price=product.regular_price,
         sale_price=product.sale_price,
@@ -104,7 +112,7 @@ def _is_item_orphaned(item: CartItem) -> bool:
     return False
 
 
-def _build_item_response(item: CartItem, db: Session) -> Optional[CartItemResponse]:
+def _build_item_response(item: CartItem, db: Session, lang: str = "es") -> Optional[CartItemResponse]:
     """Build full cart item response. Returns None if product/variant was deleted."""
     product = item.product
     variant = item.variant
@@ -122,7 +130,7 @@ def _build_item_response(item: CartItem, db: Session) -> Optional[CartItemRespon
         product_id=item.product_id,
         variant_id=item.variant_id,
         quantity=item.quantity,
-        product=_build_product_info(product),
+        product=_build_product_info(product, lang),
         variant=_build_variant_info(variant) if variant else None,
         unit_price=unit_price,
         line_total=round(unit_price * item.quantity, 2),
@@ -154,15 +162,16 @@ def _build_cart_summary(cart: Cart, db: Session) -> CartSummary:
     )
 
 
-def _build_cart_response(cart: Cart, db: Session) -> CartResponse:
-    """Build full cart response with warnings"""
+def _build_cart_response(cart: Cart, db: Session, lang: str = "es") -> CartResponse:
+    """Build full cart response with warnings, totals, and validation"""
     items = []
     warnings = []
     items_to_remove = []
     removed_count = 0
+    cart_items_for_shipping = []
     
     for item in cart.items:
-        item_response = _build_item_response(item, db)
+        item_response = _build_item_response(item, db, lang)
         
         # Handle deleted products - mark for removal
         if item_response is None:
@@ -171,6 +180,11 @@ def _build_cart_response(cart: Cart, db: Session) -> CartResponse:
             continue
         
         items.append(item_response)
+        cart_items_for_shipping.append({
+            "product_id": item.product_id,
+            "variant_id": item.variant_id,
+            "quantity": item.quantity
+        })
         
         # Add warnings for stock issues
         if item_response.stock_status == "out_of_stock":
@@ -204,13 +218,92 @@ def _build_cart_response(cart: Cart, db: Session) -> CartResponse:
     
     summary = _build_cart_summary(cart, db)
     
+    # Calculate shipping
+    shipping_fee = 0.0
+    shipping_incentive_data = None
+    if cart_items_for_shipping:
+        try:
+            shipping_fee = calculate_shipping_cost(cart_items_for_shipping, db)
+            shipping_incentive_data = get_shipping_incentive(cart_items_for_shipping, db)
+        except Exception:
+            # If shipping calculation fails, continue with 0
+            pass
+    
+    # Get order limits from settings
+    settings_service = SettingsService(db)
+    min_order_amount = settings_service.get_setting_as_float("min_order_amount", 50.0)
+    max_order_amount = settings_service.get_setting_as_float("max_order_amount", 2000.0)
+    
+    # Calculate tax (using store address for now - no customer address context in cart)
+    # Tax will be recalculated at checkout with actual shipping address
+    tax_service = TaxService(db)
+    tax_result = tax_service.calculate_tax(
+        subtotal=summary.subtotal,
+        shipping_fee=shipping_fee,
+        address=None,  # No address context in cart view
+        is_pickup=False
+    )
+    
+    # Calculate total
+    total = round(summary.subtotal + shipping_fee + tax_result.tax_amount, 2)
+    
+    # Validate order amounts
+    can_checkout = True
+    order_validation_error = None
+    
+    if summary.subtotal < min_order_amount:
+        can_checkout = False
+        difference = min_order_amount - summary.subtotal
+        if lang == "en":
+            order_validation_error = f"Minimum order is ${min_order_amount:.2f}. Add ${difference:.2f} more to continue."
+        else:
+            order_validation_error = f"El pedido minimo es de ${min_order_amount:.2f}. Agrega ${difference:.2f} mas para continuar."
+    elif summary.subtotal > max_order_amount:
+        can_checkout = False
+        difference = summary.subtotal - max_order_amount
+        if lang == "en":
+            order_validation_error = f"Maximum order is ${max_order_amount:.2f}. Remove ${difference:.2f} to continue."
+        else:
+            order_validation_error = f"El pedido maximo es de ${max_order_amount:.2f}. Reduce ${difference:.2f} para continuar."
+    
+    # Build shipping incentive
+    shipping_incentive = None
+    if shipping_incentive_data:
+        # Select message based on language
+        message = localize_field(
+            shipping_incentive_data.get("message", ""),
+            shipping_incentive_data.get("message_en", ""),
+            lang
+        )
+        shipping_incentive = ShippingIncentive(
+            type=shipping_incentive_data.get("type", "free_shipping"),
+            message=message or "",
+            amount_needed=shipping_incentive_data.get("amount_needed"),
+            items_needed=shipping_incentive_data.get("items_needed"),
+            category=shipping_incentive_data.get("category"),
+            potential_savings=shipping_incentive_data.get("potential_savings", 0.0)
+        )
+    
     return CartResponse(
         id=cart.id,
         items_count=summary.items_count,
         total_items=summary.total_items,
         subtotal=summary.subtotal,
         items=items,
-        warnings=warnings
+        warnings=warnings,
+        # Order Summary
+        shipping_fee=shipping_fee,
+        tax=tax_result.tax_amount,
+        tax_rate=tax_result.tax_rate,
+        tax_source=tax_result.tax_source,
+        total=total,
+        # Checkout Validation
+        can_checkout=can_checkout,
+        min_order_amount=min_order_amount,
+        max_order_amount=max_order_amount,
+        order_validation_error=order_validation_error,
+        # Shipping Incentive
+        shipping_incentive=shipping_incentive
     )
 
 
@@ -260,11 +353,12 @@ def get_or_create_cart(
 def get_cart(
     db: Session,
     session_id: Optional[str] = None,
-    user: Optional[User] = None
+    user: Optional[User] = None,
+    lang: str = "es"
 ) -> CartResponse:
     """Get cart with all items and warnings"""
     cart = get_or_create_cart(db, session_id, user)
-    return _build_cart_response(cart, db)
+    return _build_cart_response(cart, db, lang)
 
 
 def add_item(

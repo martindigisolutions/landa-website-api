@@ -17,6 +17,7 @@ from schemas.cart import (
     AddItemResponse, UpdateItemResponse, DeleteItemResponse,
     ClearCartResponse, MergeCartResponse, RecommendationsResponse
 )
+from utils.language import get_language_from_header
 
 router = APIRouter(prefix="/cart", tags=["Cart"])
 
@@ -77,6 +78,7 @@ def get_optional_user(
     **Headers:**
     - `X-Session-ID`: Required for guest users, optional for authenticated users
     - `Authorization`: Bearer token (optional)
+    - `Accept-Language`: `en` for English, `es` for Spanish (default)
     
     Returns cart with items, totals, and any stock warnings.
     """
@@ -84,7 +86,8 @@ def get_optional_user(
 def get_cart(
     session_id: Optional[str] = Depends(get_session_id),
     user: Optional[User] = Depends(get_optional_user),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    accept_language: Optional[str] = Header(None, alias="Accept-Language")
 ):
     if not session_id and not user:
         raise HTTPException(
@@ -92,7 +95,8 @@ def get_cart(
             detail="X-Session-ID header is required for guest users"
         )
     
-    return cart_service.get_cart(db, session_id, user)
+    lang = get_language_from_header(accept_language)
+    return cart_service.get_cart(db, session_id, user, lang)
 
 
 @router.post(

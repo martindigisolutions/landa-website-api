@@ -11,7 +11,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger("landa-api")
 
-print("🚀 Starting Landa Beauty Supply API...")
+print("[START] Starting Landa Beauty Supply API...")
 print(f"Python version: {sys.version}")
 print(f"DATABASE_URL set: {bool(os.getenv('DATABASE_URL'))}")
 
@@ -20,34 +20,34 @@ try:
     from fastapi.middleware.cors import CORSMiddleware
     from fastapi.responses import JSONResponse
     from fastapi.exceptions import RequestValidationError
-    print("✅ FastAPI imported")
+    print("[OK] FastAPI imported")
 except Exception as e:
-    print(f"❌ Error importing FastAPI: {e}")
+    print(f"[ERROR] Error importing FastAPI: {e}")
     traceback.print_exc()
     raise
 
 try:
     from routers import auth, products, checkout_router, stripe_router, oauth_router, admin_router, cart_router
-    print("✅ Routers imported")
+    print("[OK] Routers imported")
 except Exception as e:
-    print(f"❌ Error importing routers: {e}")
+    print(f"[ERROR] Error importing routers: {e}")
     traceback.print_exc()
     raise
 
 try:
     from database import Base, engine, SessionLocal
-    print("✅ Database imported")
+    print("[OK] Database imported")
 except Exception as e:
-    print(f"❌ Error importing database: {e}")
+    print(f"[ERROR] Error importing database: {e}")
     traceback.print_exc()
     raise
 
 try:
     from mangum import Mangum
     from config import ADMIN_CLIENT_ID, ADMIN_CLIENT_SECRET
-    print("✅ Config imported")
+    print("[OK] Config imported")
 except Exception as e:
-    print(f"❌ Error importing config: {e}")
+    print(f"[ERROR] Error importing config: {e}")
     traceback.print_exc()
     raise
 
@@ -78,17 +78,17 @@ def init_admin_app():
                 if existing.client_secret_hash != new_secret_hash:
                     existing.client_secret_hash = new_secret_hash
                     updated = True
-                    print(f"🔄 Admin app '{ADMIN_CLIENT_ID}' secret updated")
+                    print(f"[UPDATE] Admin app '{ADMIN_CLIENT_ID}' secret updated")
                 
                 if not existing.is_active:
                     existing.is_active = True
                     updated = True
-                    print(f"✅ Admin app '{ADMIN_CLIENT_ID}' reactivated")
+                    print(f"[OK] Admin app '{ADMIN_CLIENT_ID}' reactivated")
                 
                 if set(existing.scopes or []) != set(AVAILABLE_SCOPES):
                     existing.scopes = AVAILABLE_SCOPES
                     updated = True
-                    print(f"🔄 Admin app '{ADMIN_CLIENT_ID}' scopes updated")
+                    print(f"[UPDATE] Admin app '{ADMIN_CLIENT_ID}' scopes updated")
                 
                 if updated:
                     db.commit()
@@ -105,12 +105,32 @@ def init_admin_app():
             
             db.add(new_app)
             db.commit()
-            print(f"✅ Super Admin app created: {ADMIN_CLIENT_ID}")
+            print(f"[OK] Super Admin app created: {ADMIN_CLIENT_ID}")
             
         finally:
             db.close()
     except Exception as e:
-        print(f"⚠️ Could not initialize admin app: {e}")
+        print(f"[WARN] Could not initialize admin app: {e}")
+
+
+def init_store_settings():
+    """
+    Initialize default store settings if they don't exist.
+    This ensures the cart can calculate taxes and validate order amounts.
+    """
+    try:
+        from services.settings_service import SettingsService
+        
+        db = SessionLocal()
+        try:
+            service = SettingsService(db)
+            created_count = service.seed_default_settings()
+            if created_count > 0:
+                print(f"[OK] Created {created_count} default store settings")
+        finally:
+            db.close()
+    except Exception as e:
+        print(f"[WARN] Could not initialize store settings: {e}")
 
 
 @asynccontextmanager
@@ -118,11 +138,12 @@ async def lifespan(app: FastAPI):
     # Startup
     try:
         Base.metadata.create_all(bind=engine)
-        print("✅ Database tables created/verified")
+        print("[OK] Database tables created/verified")
     except Exception as e:
-        print(f"⚠️ Could not create tables: {e}")
+        print(f"[WARN] Could not create tables: {e}")
     
     init_admin_app()
+    init_store_settings()
     
     yield
     # Shutdown (nothing to do)
@@ -203,7 +224,7 @@ handler = Mangum(app)
 if __name__ == "__main__":
     import uvicorn
     port = int(os.getenv("PORT", 8080))
-    print(f"🚀 Starting server on port {port}...")
+    print(f"[START] Starting server on port {port}...")
     uvicorn.run(
         app,
         host="0.0.0.0",

@@ -140,6 +140,7 @@ class ProductVariantCreate(BaseModel):
     image_url: Optional[str] = None
     display_order: int = 0
     active: bool = True  # Soft delete without removing
+    weight_lbs: Optional[float] = None  # Weight in pounds (overrides product weight if set)
 
 
 class ProductVariantResponse(BaseModel):
@@ -157,6 +158,7 @@ class ProductVariantResponse(BaseModel):
     image_url: Optional[str] = None
     display_order: int = 0
     active: bool = True
+    weight_lbs: Optional[float] = None  # Weight in pounds (overrides product weight if set)
 
     class Config:
         from_attributes = True
@@ -182,6 +184,7 @@ class ProductVariantUpdate(BaseModel):
     image_url: Optional[str] = None
     display_order: Optional[int] = None
     active: Optional[bool] = None
+    weight_lbs: Optional[float] = None  # Weight in pounds (overrides product weight if set)
 
 
 class VariantBulkDelete(BaseModel):

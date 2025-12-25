@@ -95,16 +95,44 @@ class CartSummary(BaseModel):
     subtotal: float  # Sum of all line_totals
 
 
+# ---------- Shipping Incentive ----------
+
+class ShippingIncentive(BaseModel):
+    """Incentive to encourage adding more items for better shipping"""
+    type: str  # "free_shipping", "reduced_shipping", "category_discount"
+    message: str  # Message ready for display (in requested language)
+    amount_needed: Optional[float] = None  # Additional amount needed
+    items_needed: Optional[int] = None  # Additional items needed
+    category: Optional[str] = None  # Specific category if applicable
+    potential_savings: float  # How much they would save on shipping
+
+
 # ---------- Cart Response ----------
 
 class CartResponse(BaseModel):
-    """Full cart response"""
+    """Full cart response with order summary and validation"""
     id: int
     items_count: int
     total_items: int
     subtotal: float
     items: List[CartItemResponse] = []
     warnings: List[StockWarning] = []
+    
+    # Order Summary - Totals
+    shipping_fee: float = 0.0
+    tax: float = 0.0
+    tax_rate: float = 0.0  # Tax rate percentage applied
+    tax_source: str = "none"  # "grt_api", "fixed_rate", "store_rate", "none"
+    total: float = 0.0  # subtotal + shipping_fee + tax
+    
+    # Checkout Validation
+    can_checkout: bool = True
+    min_order_amount: float = 0.0
+    max_order_amount: float = 0.0
+    order_validation_error: Optional[str] = None
+    
+    # Shipping Incentive (optional)
+    shipping_incentive: Optional[ShippingIncentive] = None
 
     class Config:
         from_attributes = True

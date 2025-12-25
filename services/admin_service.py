@@ -63,6 +63,8 @@ AVAILABLE_SCOPES = [
     "stats:read",
     "shipping:read",
     "shipping:write",
+    "settings:read",
+    "settings:write",
 ]
 
 # Special scope that grants all permissions
