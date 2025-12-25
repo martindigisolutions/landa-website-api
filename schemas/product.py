@@ -99,6 +99,7 @@ class ProductPublic(BaseModel):
     stock: Optional[int] = None
     is_in_stock: Optional[bool] = None
     restock_date: Optional[datetime] = None
+    low_stock_threshold: Optional[int] = None
     is_favorite: Optional[bool] = None
     notify_when_available: Optional[bool] = None
     image_url: Optional[str] = None

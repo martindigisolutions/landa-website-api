@@ -230,6 +230,7 @@ def _product_to_public(product: Product, lang: str = "es", db: Session = None) -
         stock=product.stock,
         is_in_stock=product.is_in_stock,
         restock_date=product.restock_date,
+        low_stock_threshold=product.low_stock_threshold,
         is_favorite=product.is_favorite,
         notify_when_available=product.notify_when_available,
         image_url=product.image_url,
