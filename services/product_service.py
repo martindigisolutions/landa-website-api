@@ -255,12 +255,51 @@ def get_products(
     max_price: Optional[float] = None,
     category: Optional[List[str]] = None,
     category_group: Optional[str] = None,
+    similar_to: Optional[str] = None,
     page: int = 1,
     page_size: int = 20,
     sort_by: str = "name"
 ) -> PaginatedProductResponse:
-    """Get paginated list of products with localization"""
+    """Get paginated list of products with localization.
+    
+    Args:
+        similar_to: If provided, returns only products that are in the 
+                   similar_products array of the specified product.
+                   Can be a seller_sku or product ID.
+    """
     query = db.query(Product)
+    
+    # Handle similar_to filter FIRST - restricts to products in similar_products array
+    if similar_to:
+        # Try to find the source product by SKU first, then by ID
+        source_product = db.query(Product).filter(Product.seller_sku == similar_to).first()
+        if not source_product:
+            # Try by ID
+            try:
+                product_id = int(similar_to)
+                source_product = db.query(Product).filter(Product.id == product_id).first()
+            except ValueError:
+                pass
+        
+        if not source_product:
+            raise HTTPException(status_code=404, detail=f"Product '{similar_to}' not found")
+        
+        # Get the similar_products array (list of seller_sku strings)
+        similar_skus = source_product.similar_products or []
+        
+        if not similar_skus:
+            # No similar products defined - return empty response
+            return PaginatedProductResponse(
+                page=page,
+                page_size=page_size,
+                total_items=0,
+                total_pages=0,
+                sorted_by=sort_by,
+                results=[]
+            )
+        
+        # Filter to only products with SKUs in the similar_products array
+        query = query.filter(Product.seller_sku.in_(similar_skus))
     
     # Search in both languages
     if search:
