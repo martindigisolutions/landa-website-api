@@ -2,16 +2,22 @@
 Tax calculation service with GRT API integration for New Mexico
 """
 import httpx
+import logging
 from typing import Optional, Tuple
+from datetime import datetime, timedelta
 from sqlalchemy.orm import Session
 from decimal import Decimal, ROUND_HALF_UP
 
-from models import StoreSettings
+from models import StoreSettings, TaxRateCache
 from schemas.settings import TaxAddress, TaxCalculationResult, StoreAddress
 
+logger = logging.getLogger("landa-api.tax")
 
 # GRT API Base URL
 GRT_API_URL = "https://grt.edacnm.org/api/by_address"
+
+# Cache TTL in days
+TAX_CACHE_TTL_DAYS = 7
 
 
 class TaxService:
@@ -45,6 +51,58 @@ class TaxService:
             return float(self._get_setting(key, str(default)))
         except (ValueError, TypeError):
             return default
+    
+    def _get_cached_rate(self, street_name: str, city: str, state: str, zipcode: str) -> Optional[float]:
+        """Get cached tax rate if available and not expired"""
+        # Normalize for comparison
+        street_upper = (street_name or "").upper().strip()
+        city_upper = city.upper().strip()
+        state_upper = state.upper().strip()
+        
+        cache_entry = self.db.query(TaxRateCache).filter(
+            TaxRateCache.street_name == street_upper,
+            TaxRateCache.city == city_upper,
+            TaxRateCache.state == state_upper,
+            TaxRateCache.zipcode == zipcode,
+            TaxRateCache.expires_at > datetime.utcnow()
+        ).first()
+        
+        if cache_entry:
+            logger.info(f"Tax cache HIT for {street_name}, {city}, {state} {zipcode}: {cache_entry.tax_rate}%")
+            return cache_entry.tax_rate
+        
+        return None
+    
+    def _save_to_cache(self, street_name: str, city: str, state: str, zipcode: str, tax_rate: float, 
+                       county: Optional[str] = None, location_code: Optional[str] = None):
+        """Save tax rate to cache"""
+        # Normalize for storage
+        street_upper = (street_name or "").upper().strip()
+        city_upper = city.upper().strip()
+        state_upper = state.upper().strip()
+        
+        # Delete any existing entry for this address
+        self.db.query(TaxRateCache).filter(
+            TaxRateCache.street_name == street_upper,
+            TaxRateCache.city == city_upper,
+            TaxRateCache.state == state_upper,
+            TaxRateCache.zipcode == zipcode
+        ).delete()
+        
+        # Create new cache entry
+        cache_entry = TaxRateCache(
+            street_name=street_upper,
+            city=city_upper,
+            state=state_upper,
+            zipcode=zipcode,
+            tax_rate=tax_rate,
+            county=county,
+            location_code=location_code,
+            expires_at=datetime.utcnow() + timedelta(days=TAX_CACHE_TTL_DAYS)
+        )
+        self.db.add(cache_entry)
+        self.db.commit()
+        logger.info(f"Tax cache SAVED for {street_name}, {city}, {state} {zipcode}: {tax_rate}% (expires in {TAX_CACHE_TTL_DAYS} days)")
     
     def get_store_address(self) -> StoreAddress:
         """Get store address from settings"""
@@ -116,14 +174,25 @@ class TaxService:
     
     def _call_grt_api_sync(self, address: TaxAddress) -> Tuple[Optional[float], Optional[str]]:
         """
-        Synchronous version of GRT API call.
+        Synchronous version of GRT API call with caching.
         Returns (tax_rate, error_message)
         """
+        street_name = address.street_name or ""
+        city = address.city or ""
+        state = address.state or ""
+        zipcode = address.zipcode or ""
+        
+        # Check cache first (by full address including street)
+        cached_rate = self._get_cached_rate(street_name, city, state, zipcode)
+        if cached_rate is not None:
+            return cached_rate, None
+        
+        # Cache miss - call API
         params = {
             "street_number": address.street_number or "",
-            "street_name": address.street_name or "",
-            "city": address.city or "",
-            "zipcode": address.zipcode or ""
+            "street_name": street_name,
+            "city": city,
+            "zipcode": zipcode
         }
         
         # Add optional fields if present
@@ -143,6 +212,10 @@ class TaxService:
                 if results and results[0].get("success"):
                     tax_rate = results[0].get("tax_rate")
                     if tax_rate is not None:
+                        # Save to cache (by full address including street)
+                        county = results[0].get("county")
+                        location_code = results[0].get("location_code")
+                        self._save_to_cache(street_name, city, state, zipcode, float(tax_rate), county, location_code)
                         return float(tax_rate), None
                 
                 return None, "Address not found in GRT database"

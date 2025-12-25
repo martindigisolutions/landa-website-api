@@ -107,6 +107,66 @@ class ShippingIncentive(BaseModel):
     potential_savings: float  # How much they would save on shipping
 
 
+# ---------- Shipping Address ----------
+
+class ShippingAddress(BaseModel):
+    """Shipping address saved in cart"""
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+    phone: Optional[str] = None
+    email: Optional[str] = None
+    street: Optional[str] = None
+    city: str
+    state: str
+    zipcode: str
+    country: Optional[str] = "US"
+
+
+class UpdateShippingRequest(BaseModel):
+    """Request to update shipping address"""
+    street: Optional[str] = None
+    city: Optional[str] = None  # Optional for pickup
+    state: Optional[str] = None  # Optional for pickup
+    zipcode: Optional[str] = Field(None, alias="zipcode")
+    zip: Optional[str] = Field(None)  # Alias for zipcode (frontend compatibility)
+    is_pickup: bool = False
+    delivery_method: Optional[str] = None  # "delivery" or "pickup" (frontend compatibility)
+    # Extra fields from frontend
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+    phone: Optional[str] = None
+    email: Optional[str] = None
+    country: Optional[str] = None
+    
+    def get_zipcode(self) -> str:
+        """Get zipcode from either field"""
+        return self.zipcode or self.zip or ""
+    
+    def get_is_pickup(self) -> bool:
+        """Get pickup status from either field"""
+        if self.delivery_method:
+            return self.delivery_method.lower() == "pickup"
+        return self.is_pickup
+
+
+class UpdateShippingResponse(BaseModel):
+    """Response after updating shipping address"""
+    success: bool
+    message: str
+    shipping_address: Optional[ShippingAddress] = None
+    is_pickup: bool = False
+
+
+# ---------- Payment Methods ----------
+
+class PaymentMethod(BaseModel):
+    """Available payment method"""
+    id: str  # "stripe", "cash", "zelle"
+    name: str  # Display name in requested language
+    enabled: bool = True
+    icon: Optional[str] = None  # Icon identifier
+
+
 # ---------- Cart Response ----------
 
 class CartResponse(BaseModel):
@@ -124,6 +184,13 @@ class CartResponse(BaseModel):
     tax_rate: float = 0.0  # Tax rate percentage applied
     tax_source: str = "none"  # "grt_api", "fixed_rate", "store_rate", "none"
     total: float = 0.0  # subtotal + shipping_fee + tax
+    
+    # Shipping Address (saved from checkout)
+    shipping_address: Optional[ShippingAddress] = None
+    is_pickup: bool = False
+    
+    # Payment Methods Available
+    payment_methods: List[PaymentMethod] = []
     
     # Checkout Validation
     can_checkout: bool = True

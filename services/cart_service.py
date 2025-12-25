@@ -13,7 +13,8 @@ from schemas.cart import (
     CartProductInfo, CartVariantInfo, CartSummary,
     AddItemResponse, UpdateItemResponse, DeleteItemResponse,
     ClearCartResponse, MergeCartResponse, StockWarning,
-    RecommendedProduct, RecommendationsResponse, ShippingIncentive
+    RecommendedProduct, RecommendationsResponse, ShippingIncentive,
+    UpdateShippingRequest, UpdateShippingResponse, ShippingAddress
 )
 from services.settings_service import SettingsService
 from services.tax_service import TaxService
@@ -61,6 +62,8 @@ def _check_stock_status(quantity: int, available_stock: int, is_in_stock: bool) 
     if available_stock <= 5:  # Low stock warning threshold
         return "low_stock"
     return "available"
+
+
 
 
 def _build_product_info(product: Product, lang: str = "es") -> CartProductInfo:
@@ -234,14 +237,25 @@ def _build_cart_response(cart: Cart, db: Session, lang: str = "es") -> CartRespo
     min_order_amount = settings_service.get_setting_as_float("min_order_amount", 50.0)
     max_order_amount = settings_service.get_setting_as_float("max_order_amount", 2000.0)
     
-    # Calculate tax (using store address for now - no customer address context in cart)
-    # Tax will be recalculated at checkout with actual shipping address
+    # Calculate tax using saved shipping address if available
     tax_service = TaxService(db)
+    
+    # Build tax address from cart's saved shipping address
+    tax_address = None
+    if cart.shipping_city and cart.shipping_state and cart.shipping_zipcode:
+        tax_address = TaxAddress(
+            street_number="",  # Not needed for tax calculation
+            street_name=cart.shipping_street or "",
+            city=cart.shipping_city,
+            state=cart.shipping_state,
+            zipcode=cart.shipping_zipcode
+        )
+    
     tax_result = tax_service.calculate_tax(
         subtotal=summary.subtotal,
         shipping_fee=shipping_fee,
-        address=None,  # No address context in cart view
-        is_pickup=False
+        address=tax_address,
+        is_pickup=cart.is_pickup or False
     )
     
     # Calculate total
@@ -284,6 +298,36 @@ def _build_cart_response(cart: Cart, db: Session, lang: str = "es") -> CartRespo
             potential_savings=shipping_incentive_data.get("potential_savings", 0.0)
         )
     
+    # Build shipping address
+    shipping_address = None
+    if cart.is_pickup:
+        # For pickup, return store address
+        store_addr = tax_service.get_store_address()
+        shipping_address = ShippingAddress(
+            first_name=cart.shipping_first_name,
+            last_name=cart.shipping_last_name,
+            phone=cart.shipping_phone,
+            email=cart.shipping_email,
+            street=f"{store_addr.street_number} {store_addr.street_name} {store_addr.street_suffix or ''} {store_addr.street_direction or ''}".strip(),
+            city=store_addr.city,
+            state=store_addr.state,
+            zipcode=store_addr.zipcode,
+            country="US"
+        )
+    elif cart.shipping_city and cart.shipping_state and cart.shipping_zipcode:
+        # For delivery, return customer address
+        shipping_address = ShippingAddress(
+            first_name=cart.shipping_first_name,
+            last_name=cart.shipping_last_name,
+            phone=cart.shipping_phone,
+            email=cart.shipping_email,
+            street=cart.shipping_street,
+            city=cart.shipping_city,
+            state=cart.shipping_state,
+            zipcode=cart.shipping_zipcode,
+            country=cart.shipping_country or "US"
+        )
+    
     return CartResponse(
         id=cart.id,
         items_count=summary.items_count,
@@ -297,6 +341,9 @@ def _build_cart_response(cart: Cart, db: Session, lang: str = "es") -> CartRespo
         tax_rate=tax_result.tax_rate,
         tax_source=tax_result.tax_source,
         total=total,
+        # Shipping Address
+        shipping_address=shipping_address,
+        is_pickup=cart.is_pickup or False,
         # Checkout Validation
         can_checkout=can_checkout,
         min_order_amount=min_order_amount,
@@ -359,6 +406,121 @@ def get_cart(
     """Get cart with all items and warnings"""
     cart = get_or_create_cart(db, session_id, user)
     return _build_cart_response(cart, db, lang)
+
+
+# ---------- Shipping Address Operations ----------
+
+def update_shipping_address(
+    db: Session,
+    session_id: Optional[str],
+    user: Optional[User],
+    data: UpdateShippingRequest
+) -> UpdateShippingResponse:
+    """Update shipping address in cart"""
+    cart = get_or_create_cart(db, session_id, user)
+    
+    # Get pickup status from either field
+    is_pickup = data.get_is_pickup()
+    
+    # For pickup, address is optional (will use store address)
+    if not is_pickup:
+        # Validate required fields for delivery
+        if not data.city:
+            raise HTTPException(status_code=400, detail="City is required for delivery")
+        if not data.state or len(data.state) != 2:
+            raise HTTPException(status_code=400, detail="State must be a 2-letter code (e.g., NM, TX)")
+        zipcode = data.get_zipcode()
+        if not zipcode:
+            raise HTTPException(status_code=400, detail="Zipcode is required for delivery")
+    else:
+        zipcode = data.get_zipcode()  # Optional for pickup
+    
+    # Update cart with shipping info
+    # For pickup, only update contact info and is_pickup flag (preserve customer address)
+    # For delivery, update full address
+    if data.first_name:
+        cart.shipping_first_name = data.first_name
+    if data.last_name:
+        cart.shipping_last_name = data.last_name
+    if data.phone:
+        cart.shipping_phone = data.phone
+    if data.email:
+        cart.shipping_email = data.email
+    
+    if not is_pickup:
+        # Only update address for delivery
+        cart.shipping_street = data.street
+        cart.shipping_city = data.city or ""
+        cart.shipping_state = (data.state or "").upper()
+        cart.shipping_zipcode = zipcode or ""
+        cart.shipping_country = data.country or "US"
+    
+    cart.is_pickup = is_pickup
+    cart.updated_at = datetime.utcnow()
+    
+    db.commit()
+    
+    # Build response address
+    if is_pickup:
+        # Return store address for pickup
+        tax_service = TaxService(db)
+        store_addr = tax_service.get_store_address()
+        response_address = ShippingAddress(
+            first_name=cart.shipping_first_name,
+            last_name=cart.shipping_last_name,
+            phone=cart.shipping_phone,
+            email=cart.shipping_email,
+            street=f"{store_addr.street_number} {store_addr.street_name} {store_addr.street_suffix or ''} {store_addr.street_direction or ''}".strip(),
+            city=store_addr.city,
+            state=store_addr.state,
+            zipcode=store_addr.zipcode,
+            country="US"
+        )
+    else:
+        response_address = ShippingAddress(
+            first_name=cart.shipping_first_name,
+            last_name=cart.shipping_last_name,
+            phone=cart.shipping_phone,
+            email=cart.shipping_email,
+            street=cart.shipping_street,
+            city=cart.shipping_city,
+            state=cart.shipping_state,
+            zipcode=cart.shipping_zipcode,
+            country=cart.shipping_country
+        )
+    
+    return UpdateShippingResponse(
+        success=True,
+        message="Shipping address saved",
+        shipping_address=response_address,
+        is_pickup=is_pickup
+    )
+
+
+def delete_shipping_address(
+    db: Session,
+    session_id: Optional[str],
+    user: Optional[User]
+) -> UpdateShippingResponse:
+    """Remove shipping address from cart"""
+    cart = get_or_create_cart(db, session_id, user)
+    
+    # Clear shipping info
+    cart.shipping_street = None
+    cart.shipping_city = None
+    cart.shipping_state = None
+    cart.shipping_zipcode = None
+    cart.is_pickup = False
+    cart.updated_at = datetime.utcnow()
+    
+    db.commit()
+    
+    return UpdateShippingResponse(
+        success=True,
+        message="Shipping address removed",
+        shipping_address=None,
+        is_pickup=False
+    )
 
 
 def add_item(

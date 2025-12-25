@@ -15,7 +15,8 @@ from config import SECRET_KEY, ALGORITHM
 from schemas.cart import (
     CartResponse, CartItemCreate, CartItemUpdate,
     AddItemResponse, UpdateItemResponse, DeleteItemResponse,
-    ClearCartResponse, MergeCartResponse, RecommendationsResponse
+    ClearCartResponse, MergeCartResponse, RecommendationsResponse,
+    UpdateShippingRequest, UpdateShippingResponse
 )
 from utils.language import get_language_from_header
 
@@ -331,3 +332,67 @@ def get_recommendations(
     limit = min(limit, 20)
     
     return cart_service.get_cart_recommendations(db, session_id, user, limit)
+
+
+# ==================== SHIPPING ADDRESS ====================
+
+@router.put(
+    "/shipping",
+    response_model=UpdateShippingResponse,
+    summary="Update shipping address",
+    description="""
+    Save or update the shipping address for the cart.
+    Once saved, tax will be calculated automatically on GET /cart.
+    
+    **Headers:**
+    - `X-Session-ID`: Required for guest users
+    - `Authorization`: Bearer token (optional)
+    
+    **Fields:**
+    - `street`: Street address (optional)
+    - `city`: City (required)
+    - `state`: State code, e.g., "NM", "TX" (required)
+    - `zipcode`: ZIP code (required)
+    - `is_pickup`: If true, uses store address for tax calculation
+    """
+)
+def update_shipping_address(
+    data: UpdateShippingRequest,
+    session_id: Optional[str] = Depends(get_session_id),
+    user: Optional[User] = Depends(get_optional_user),
+    db: Session = Depends(get_db)
+):
+    if not session_id and not user:
+        raise HTTPException(
+            status_code=400,
+            detail="X-Session-ID header is required for guest users"
+        )
+    
+    return cart_service.update_shipping_address(db, session_id, user, data)
+
+
+@router.delete(
+    "/shipping",
+    response_model=UpdateShippingResponse,
+    summary="Remove shipping address",
+    description="""
+    Remove the saved shipping address from the cart.
+    Tax will return to 0 on subsequent GET /cart calls.
+    
+    **Headers:**
+    - `X-Session-ID`: Required for guest users
+    - `Authorization`: Bearer token (optional)
+    """
+)
+def delete_shipping_address(
+    session_id: Optional[str] = Depends(get_session_id),
+    user: Optional[User] = Depends(get_optional_user),
+    db: Session = Depends(get_db)
+):
+    if not session_id and not user:
+        raise HTTPException(
+            status_code=400,
+            detail="X-Session-ID header is required for guest users"
+        )
+    
+    return cart_service.delete_shipping_address(db, session_id, user)

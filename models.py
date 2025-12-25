@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Boolean, Float, Date, DateTime, ForeignKey, JSON, func
+from sqlalchemy import Column, Integer, String, Boolean, Float, Date, DateTime, ForeignKey, JSON, func, Index
 from sqlalchemy.orm import relationship
 from datetime import datetime
 from database import Base
@@ -347,6 +347,18 @@ class Cart(Base):
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True)
     session_id = Column(String, nullable=True, index=True)  # For guest users
     
+    # Shipping address (saved from checkout)
+    shipping_first_name = Column(String, nullable=True)
+    shipping_last_name = Column(String, nullable=True)
+    shipping_phone = Column(String, nullable=True)
+    shipping_email = Column(String, nullable=True)
+    shipping_street = Column(String, nullable=True)
+    shipping_city = Column(String, nullable=True)
+    shipping_state = Column(String, nullable=True)
+    shipping_zipcode = Column(String, nullable=True)
+    shipping_country = Column(String, nullable=True, default="US")
+    is_pickup = Column(Boolean, default=False)  # True if store pickup
+    
     # Timestamps
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -401,6 +413,33 @@ class StoreSettings(Base):
 # Default settings keys (for reference)
 # - min_order_amount: Minimum order amount to checkout (number)
 # - max_order_amount: Maximum order amount allowed (number)
+
+
+class TaxRateCache(Base):
+    """
+    Cache for GRT tax rates by full address.
+    Avoids repeated API calls for the same address.
+    Note: Tax rates can vary by street within the same city/zipcode.
+    """
+    __tablename__ = "tax_rate_cache"
+
+    id = Column(Integer, primary_key=True, index=True)
+    street_name = Column(String, nullable=True)  # Street name for precise matching
+    city = Column(String, nullable=False)
+    state = Column(String, nullable=False)
+    zipcode = Column(String, nullable=False)
+    tax_rate = Column(Float, nullable=False)
+    county = Column(String, nullable=True)
+    location_code = Column(String, nullable=True)
+    
+    # Cache metadata
+    created_at = Column(DateTime, default=datetime.utcnow)
+    expires_at = Column(DateTime, nullable=False)  # When cache expires
+    
+    # Index on full address for lookups
+    __table_args__ = (
+        Index('ix_tax_cache_address', 'street_name', 'city', 'state', 'zipcode'),
+    )
 # - tax_rate: Tax rate percentage (number, e.g., 8.25 for 8.25%)
 # - enable_taxes: Whether taxes are enabled (boolean)
 # - free_shipping_threshold: Amount for free shipping (number)
