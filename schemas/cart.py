@@ -167,6 +167,15 @@ class PaymentMethod(BaseModel):
     icon: Optional[str] = None  # Icon identifier
 
 
+# ---------- Active Lock Info (for GET /cart) ----------
+
+class ActiveLockInfo(BaseModel):
+    """Information about an active lock for GET /cart"""
+    lock_token: str
+    expires_at: datetime
+    expires_in_seconds: int
+
+
 # ---------- Cart Response ----------
 
 class CartResponse(BaseModel):
@@ -189,8 +198,11 @@ class CartResponse(BaseModel):
     shipping_address: Optional[ShippingAddress] = None
     is_pickup: bool = False
     
-    # Payment Methods Available
-    payment_methods: List[PaymentMethod] = []
+    # Payment method selected
+    payment_method: Optional[str] = None  # "stripe" | "zelle"
+    
+    # Active lock info (if exists)
+    active_lock: Optional[ActiveLockInfo] = None
     
     # Checkout Validation
     can_checkout: bool = True
@@ -279,3 +291,65 @@ class RecommendationsResponse(BaseModel):
     """Response for cart-based recommendations ('Te puede interesar')"""
     recommendations: List[RecommendedProduct] = []
     based_on_items: int  # Number of cart items used for recommendations
+
+
+# ---------- Payment Method Update ----------
+
+class UpdatePaymentMethodRequest(BaseModel):
+    """Request to update payment method"""
+    payment_method: str  # "stripe" | "zelle"
+
+
+class UpdatePaymentMethodResponse(BaseModel):
+    """Response after updating payment method"""
+    success: bool
+    payment_method: str
+    message: str
+
+
+# ---------- Cart Lock System ----------
+
+class UnavailableItem(BaseModel):
+    """Item with insufficient stock"""
+    product_id: int
+    variant_id: Optional[int] = None
+    product_name: str
+    variant_name: Optional[str] = None
+    requested: int
+    available: int
+
+
+class PaymentIntentInfo(BaseModel):
+    """Stripe payment intent info"""
+    client_secret: str
+    amount: int  # In cents
+    currency: str = "usd"
+
+
+class LockCartRequest(BaseModel):
+    """Request to lock cart (empty body, uses current cart)"""
+    pass
+
+
+class LockCartResponse(BaseModel):
+    """Response from POST /cart/lock"""
+    success: bool
+    lock_token: Optional[str] = None
+    expires_at: Optional[datetime] = None
+    expires_in_seconds: Optional[int] = None
+    payment_intent: Optional[PaymentIntentInfo] = None
+    # Error fields
+    error: Optional[str] = None  # "stock_unavailable"
+    message: Optional[str] = None
+    unavailable_items: Optional[List[UnavailableItem]] = None
+
+
+class ReleaseLockRequest(BaseModel):
+    """Request to release/cancel a lock"""
+    lock_token: str
+
+
+class ReleaseLockResponse(BaseModel):
+    """Response from DELETE /cart/lock or POST /cart/lock/release"""
+    success: bool
+    message: str

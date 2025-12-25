@@ -359,6 +359,9 @@ class Cart(Base):
     shipping_country = Column(String, nullable=True, default="US")
     is_pickup = Column(Boolean, default=False)  # True if store pickup
     
+    # Payment method (saved before lock)
+    payment_method = Column(String, nullable=True)  # "stripe" | "zelle"
+    
     # Timestamps
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -444,3 +447,62 @@ class TaxRateCache(Base):
 # - enable_taxes: Whether taxes are enabled (boolean)
 # - free_shipping_threshold: Amount for free shipping (number)
 # - shipping_incentive_threshold: % of rule to show incentive (number, default 80)
+
+
+# ==================== CART LOCK MODELS ====================
+
+# Lock expiration time in minutes
+LOCK_EXPIRATION_MINUTES = 5
+
+
+class CartLock(Base):
+    """
+    Temporary lock on cart for checkout process.
+    Reserves stock for a limited time while user completes payment.
+    """
+    __tablename__ = "cart_locks"
+
+    id = Column(Integer, primary_key=True, index=True)
+    cart_id = Column(Integer, ForeignKey("carts.id", ondelete="CASCADE"), nullable=False)
+    token = Column(String, unique=True, index=True, nullable=False)
+    status = Column(String, default="active", index=True)  # active, used, expired, cancelled
+    
+    # Stripe integration
+    stripe_payment_intent_id = Column(String, nullable=True, index=True)
+    
+    # Totals frozen at lock time
+    subtotal = Column(Float, nullable=True)
+    shipping_fee = Column(Float, nullable=True)
+    tax = Column(Float, nullable=True)
+    total = Column(Float, nullable=True)
+    
+    # Timestamps
+    created_at = Column(DateTime, default=datetime.utcnow)
+    expires_at = Column(DateTime, nullable=False)
+    used_at = Column(DateTime, nullable=True)  # When lock was used to create order
+    
+    # Relationships
+    cart = relationship("Cart", backref="locks")
+    reservations = relationship("StockReservation", back_populates="lock", cascade="all, delete-orphan")
+
+
+class StockReservation(Base):
+    """
+    Individual stock reservation within a cart lock.
+    Tracks reserved quantity for each product/variant.
+    """
+    __tablename__ = "stock_reservations"
+
+    id = Column(Integer, primary_key=True, index=True)
+    lock_id = Column(Integer, ForeignKey("cart_locks.id", ondelete="CASCADE"), nullable=False)
+    product_id = Column(Integer, ForeignKey("products.id", ondelete="CASCADE"), nullable=False)
+    variant_id = Column(Integer, ForeignKey("product_variants.id", ondelete="SET NULL"), nullable=True)
+    quantity = Column(Integer, nullable=False)
+    
+    # Price frozen at reservation time
+    unit_price = Column(Float, nullable=False)
+    
+    # Relationships
+    lock = relationship("CartLock", back_populates="reservations")
+    product = relationship("Product")
+    variant = relationship("ProductVariant")

@@ -32,11 +32,24 @@ class OrderCreate(BaseModel):
     Create an order using the server-side cart.
     Products are read from the cart, not sent by the frontend.
     For authenticated users, user is extracted from JWT token.
+    
+    **New Flow (with lock):**
+    - lock_token: Required - token from POST /cart/lock
+    - payment_id: Optional - Stripe payment ID (for confirmation)
+    
+    **Legacy Flow (without lock):**
+    - address, shipping_method, payment_method still supported for backwards compatibility
     """
     session_id: Optional[str] = None  # Required for guest users only
-    address: Address
-    shipping_method: str
-    payment_method: str
+    
+    # New lock-based flow
+    lock_token: Optional[str] = None  # Token from POST /cart/lock
+    payment_id: Optional[str] = None  # Stripe payment ID (optional)
+    
+    # Legacy fields (still supported for backwards compatibility)
+    address: Optional[Address] = None
+    shipping_method: Optional[str] = None
+    payment_method: Optional[str] = None
 
 class ConfirmManualPayment(BaseModel):
     order_id: str

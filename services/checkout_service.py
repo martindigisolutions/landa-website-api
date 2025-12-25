@@ -237,11 +237,17 @@ def create_order(
 ):
     """
     Create an order using the server-side cart.
-    Validates stock, creates order, deducts stock, and clears cart.
+    
+    **New Flow (with lock_token):**
+    - Uses pre-validated lock with reserved stock
+    - Totals are frozen at lock time
+    - Stock already reserved, just needs permanent deduction
+    
+    **Legacy Flow (without lock_token):**
+    - Validates stock at order time
+    - Risk of overselling in concurrent scenarios
     """
-    valid_methods = ["stripe", "zelle", "cashapp", "venmo", "credit_card", "cash"]
-    if data.payment_method not in valid_methods:
-        raise HTTPException(status_code=400, detail="Invalid payment method")
+    from services.cart_lock_service import use_lock
     
     user_id = user.id if user else None
     
@@ -250,6 +256,123 @@ def create_order(
     
     if not cart or not cart.items:
         raise HTTPException(status_code=400, detail="Cart is empty")
+    
+    # NEW FLOW: Using lock_token
+    if data.lock_token:
+        success, error, lock = use_lock(db, data.lock_token)
+        
+        if not success:
+            error_messages = {
+                "lock_not_found": "Lock not found",
+                "lock_already_used": "This lock was already used to create an order",
+                "lock_expired": "Lock expired. Please try again.",
+                "lock_cancelled": "Lock was cancelled"
+            }
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "error": error,
+                    "message": error_messages.get(error, "Lock validation failed"),
+                    "success": False
+                }
+            )
+        
+        # Use frozen totals from lock
+        total = lock.total
+        payment_method = cart.payment_method or "stripe"
+        shipping_method = "pickup" if cart.is_pickup else "delivery"
+        
+        # Build address from cart
+        address_data = {
+            "street": cart.shipping_street or "",
+            "city": cart.shipping_city or "",
+            "state": cart.shipping_state or "",
+            "zip": cart.shipping_zipcode or "",
+            "country": cart.shipping_country or "US"
+        }
+        
+        # Prepare order items from reservations
+        order_items_data = []
+        for reservation in lock.reservations:
+            product = reservation.product
+            variant = reservation.variant
+            
+            order_items_data.append({
+                "product_id": reservation.product_id,
+                "variant_id": reservation.variant_id,
+                "variant_name": variant.name if variant else None,
+                "quantity": reservation.quantity,
+                "price": reservation.unit_price
+            })
+        
+        # Create order with frozen totals
+        order = Order(
+            session_id=session_id,
+            user_id=user_id,
+            shipping_method=shipping_method,
+            payment_method=payment_method,
+            address=address_data,
+            total=total,
+            status="paid" if payment_method == "stripe" else "pending_verification",
+            stripe_payment_intent_id=lock.stripe_payment_intent_id
+        )
+        db.add(order)
+        db.flush()
+        
+        # Create order items and deduct stock permanently
+        for item_data in order_items_data:
+            db.add(OrderItem(
+                order_id=order.id,
+                product_id=item_data["product_id"],
+                variant_id=item_data["variant_id"],
+                variant_name=item_data["variant_name"],
+                quantity=item_data["quantity"],
+                price=item_data["price"]
+            ))
+            
+            # Deduct stock (was reserved, now permanent)
+            if item_data["variant_id"]:
+                variant = db.query(ProductVariant).filter(
+                    ProductVariant.id == item_data["variant_id"]
+                ).first()
+                if variant:
+                    variant.stock = max(0, (variant.stock or 0) - item_data["quantity"])
+                    if variant.stock <= 0:
+                        variant.is_in_stock = False
+            else:
+                product = db.query(Product).filter(
+                    Product.id == item_data["product_id"]
+                ).first()
+                if product:
+                    product.stock = max(0, (product.stock or 0) - item_data["quantity"])
+                    if product.stock <= 0:
+                        product.is_in_stock = False
+        
+        # Clear cart after successful order
+        db.query(CartItem).filter(CartItem.cart_id == cart.id).delete()
+        
+        # Clear cart shipping/payment info for next order
+        cart.payment_method = None
+        
+        db.commit()
+        
+        return {
+            "success": True,
+            "order_id": str(order.id),
+            "order_number": f"ORD-{order.id:06d}",
+            "status": order.status,
+            "total": total,
+            "items_count": len(order_items_data),
+            "message": "Order created successfully"
+        }
+    
+    # LEGACY FLOW: Without lock_token (backwards compatibility)
+    valid_methods = ["stripe", "zelle", "cashapp", "venmo", "credit_card", "cash"]
+    if not data.payment_method or data.payment_method not in valid_methods:
+        raise HTTPException(status_code=400, detail="Invalid payment method")
+    
+    if not data.address:
+        raise HTTPException(status_code=400, detail="Address is required")
     
     # Validate all items (strict validation)
     valid_items, issues = _validate_cart_items(cart, db)
@@ -328,6 +451,7 @@ def create_order(
     db.commit()
     
     return {
+        "success": True,
         "order_id": str(order.id),
         "status": "pending_payment",
         "total": total,

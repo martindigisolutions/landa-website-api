@@ -7,14 +7,15 @@ from sqlalchemy.orm import Session
 from fastapi import HTTPException
 
 from collections import Counter
-from models import Cart, CartItem, Product, ProductVariant, User
+from models import Cart, CartItem, Product, ProductVariant, User, CartLock
 from schemas.cart import (
     CartResponse, CartItemResponse, CartItemCreate, CartItemUpdate,
     CartProductInfo, CartVariantInfo, CartSummary,
     AddItemResponse, UpdateItemResponse, DeleteItemResponse,
     ClearCartResponse, MergeCartResponse, StockWarning,
     RecommendedProduct, RecommendationsResponse, ShippingIncentive,
-    UpdateShippingRequest, UpdateShippingResponse, ShippingAddress
+    UpdateShippingRequest, UpdateShippingResponse, ShippingAddress,
+    ActiveLockInfo
 )
 from services.settings_service import SettingsService
 from services.tax_service import TaxService
@@ -328,6 +329,22 @@ def _build_cart_response(cart: Cart, db: Session, lang: str = "es") -> CartRespo
             country=cart.shipping_country or "US"
         )
     
+    # Check for active lock
+    active_lock_info = None
+    active_lock = db.query(CartLock).filter(
+        CartLock.cart_id == cart.id,
+        CartLock.status == "active",
+        CartLock.expires_at > datetime.utcnow()
+    ).first()
+    
+    if active_lock:
+        expires_in_seconds = int((active_lock.expires_at - datetime.utcnow()).total_seconds())
+        active_lock_info = ActiveLockInfo(
+            lock_token=active_lock.token,
+            expires_at=active_lock.expires_at,
+            expires_in_seconds=max(0, expires_in_seconds)
+        )
+    
     return CartResponse(
         id=cart.id,
         items_count=summary.items_count,
@@ -344,6 +361,10 @@ def _build_cart_response(cart: Cart, db: Session, lang: str = "es") -> CartRespo
         # Shipping Address
         shipping_address=shipping_address,
         is_pickup=cart.is_pickup or False,
+        # Payment method
+        payment_method=cart.payment_method,
+        # Active lock info
+        active_lock=active_lock_info,
         # Checkout Validation
         can_checkout=can_checkout,
         min_order_amount=min_order_amount,

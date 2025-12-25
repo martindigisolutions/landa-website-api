@@ -1,7 +1,7 @@
 """
 Cart router for shopping cart endpoints
 """
-from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
 from sqlalchemy import or_
@@ -16,8 +16,11 @@ from schemas.cart import (
     CartResponse, CartItemCreate, CartItemUpdate,
     AddItemResponse, UpdateItemResponse, DeleteItemResponse,
     ClearCartResponse, MergeCartResponse, RecommendationsResponse,
-    UpdateShippingRequest, UpdateShippingResponse
+    UpdateShippingRequest, UpdateShippingResponse,
+    UpdatePaymentMethodRequest, UpdatePaymentMethodResponse,
+    LockCartResponse, ReleaseLockRequest, ReleaseLockResponse
 )
+from services import cart_lock_service
 from utils.language import get_language_from_header
 
 router = APIRouter(prefix="/cart", tags=["Cart"])
@@ -396,3 +399,146 @@ def delete_shipping_address(
         )
     
     return cart_service.delete_shipping_address(db, session_id, user)
+
+
+# ==================== PAYMENT METHOD ====================
+
+@router.put(
+    "/payment-method",
+    response_model=UpdatePaymentMethodResponse,
+    summary="Set payment method",
+    description="""
+    Save the selected payment method for the cart.
+    Must be called before creating a lock.
+    
+    **Headers:**
+    - `X-Session-ID`: Required for guest users
+    - `Authorization`: Bearer token (optional)
+    
+    **Body:**
+    - `payment_method`: "stripe" or "zelle"
+    """
+)
+def update_payment_method(
+    data: UpdatePaymentMethodRequest,
+    session_id: Optional[str] = Depends(get_session_id),
+    user: Optional[User] = Depends(get_optional_user),
+    db: Session = Depends(get_db)
+):
+    if not session_id and not user:
+        raise HTTPException(
+            status_code=400,
+            detail="X-Session-ID header is required for guest users"
+        )
+    
+    cart = cart_service.get_or_create_cart(db, session_id, user)
+    return cart_lock_service.update_payment_method(db, cart, data.payment_method)
+
+
+# ==================== CART LOCK SYSTEM ====================
+
+@router.post(
+    "/lock",
+    response_model=LockCartResponse,
+    summary="Lock cart and reserve stock",
+    description="""
+    Create a temporary lock on the cart, reserving stock for checkout.
+    Lock expires after 5 minutes.
+    
+    **Prerequisites:**
+    - Cart must have items
+    - Shipping address must be set (for delivery) or is_pickup must be true
+    - Payment method must be selected
+    
+    **Behavior:**
+    - Validates stock availability for all items
+    - Creates stock reservation (prevents overselling)
+    - If payment_method is "stripe", creates PaymentIntent
+    - Cancels any previous active lock for this cart
+    
+    **Headers:**
+    - `X-Session-ID`: Required for guest users
+    - `Authorization`: Bearer token (optional)
+    """
+)
+def create_lock(
+    session_id: Optional[str] = Depends(get_session_id),
+    user: Optional[User] = Depends(get_optional_user),
+    db: Session = Depends(get_db)
+):
+    if not session_id and not user:
+        raise HTTPException(
+            status_code=400,
+            detail="X-Session-ID header is required for guest users"
+        )
+    
+    cart = cart_service.get_or_create_cart(db, session_id, user)
+    return cart_lock_service.create_lock(db, cart)
+
+
+@router.delete(
+    "/lock",
+    response_model=ReleaseLockResponse,
+    summary="Release cart lock",
+    description="""
+    Cancel an active lock and release reserved stock.
+    Call this when user cancels checkout or payment fails.
+    
+    **Headers:**
+    - `X-Session-ID`: Required for guest users
+    - `Authorization`: Bearer token (optional)
+    
+    **Body:**
+    - `lock_token`: The token returned from POST /cart/lock
+    """
+)
+def release_lock(
+    data: ReleaseLockRequest,
+    session_id: Optional[str] = Depends(get_session_id),
+    user: Optional[User] = Depends(get_optional_user),
+    db: Session = Depends(get_db)
+):
+    return cart_lock_service.release_lock(db, data.lock_token)
+
+
+@router.post(
+    "/lock/release",
+    response_model=ReleaseLockResponse,
+    summary="Release cart lock (sendBeacon compatible)",
+    description="""
+    Alternative endpoint to release a lock, compatible with navigator.sendBeacon().
+    Accepts both JSON and plain text body.
+    
+    **Usage with sendBeacon:**
+    ```javascript
+    navigator.sendBeacon('/cart/lock/release', lock_token);
+    ```
+    
+    **Note:** This endpoint always returns 200 OK (idempotent).
+    """
+)
+async def release_lock_beacon(
+    request: Request,
+    db: Session = Depends(get_db)
+):
+    # Try to get lock_token from body
+    content_type = request.headers.get("content-type", "")
+    
+    try:
+        if "application/json" in content_type:
+            body = await request.json()
+            lock_token = body.get("lock_token", "")
+        else:
+            # Plain text (sendBeacon)
+            body = await request.body()
+            lock_token = body.decode("utf-8").strip()
+    except Exception:
+        lock_token = ""
+    
+    if not lock_token:
+        return ReleaseLockResponse(
+            success=True,
+            message="No lock token provided"
+        )
+    
+    return cart_lock_service.release_lock(db, lock_token)
