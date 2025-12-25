@@ -44,6 +44,9 @@ RUN rm -rf \
     *.md \
     docs
 
+# Make start script executable
+RUN chmod +x start.sh
+
 # Create non-root user for security
 RUN adduser --disabled-password --gecos '' appuser && \
     chown -R appuser:appuser /app
@@ -56,6 +59,6 @@ EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8080/api/health')" || exit 1
 
-# Run the application
-CMD ["python", "main.py"]
+# Run migrations and start the application
+CMD ["./start.sh"]
 
