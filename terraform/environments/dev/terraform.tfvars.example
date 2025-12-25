@@ -25,3 +25,4 @@ db_password = "YourSecurePassword123!"  # Use a strong password!
 # memory        = "2048"
 # min_instances = 1
 # max_instances = 3
+

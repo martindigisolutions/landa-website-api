@@ -74,3 +74,4 @@ colores_categorias.json
 Dockerfile
 docker-compose*.yml
 .dockerignore
+

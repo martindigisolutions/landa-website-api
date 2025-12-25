@@ -89,3 +89,4 @@ resource "aws_db_instance" "main" {
 
   tags = var.tags
 }
+

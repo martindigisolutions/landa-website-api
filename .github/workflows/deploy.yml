@@ -80,3 +80,4 @@ jobs:
           echo "| Image | \`${{ steps.build-image.outputs.image }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "✅ Image pushed to ECR. App Runner will auto-deploy in ~3 minutes." >> $GITHUB_STEP_SUMMARY
+

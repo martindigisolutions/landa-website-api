@@ -29,3 +29,4 @@ rds_multi_az       = false           # Set to true for high availability (~2x co
 # memory        = "2048"
 # min_instances = 1
 # max_instances = 10
+

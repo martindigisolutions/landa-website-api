@@ -45,3 +45,4 @@ output "docker_push_commands" {
     docker push ${aws_ecr_repository.api.repository_url}:latest
   EOT
 }
+

@@ -134,3 +134,4 @@ Repository secrets:
 - ✅ Usa usuarios IAM con **permisos mínimos**
 - ✅ Rota las keys periódicamente
 - ✅ Elimina keys que no uses
+
