@@ -1,14 +1,30 @@
 from logging.config import fileConfig
+import os
+from dotenv import load_dotenv
 
-from sqlalchemy import engine_from_config
+from sqlalchemy import engine_from_config, create_engine
 from sqlalchemy import pool
 
 from alembic import context
+
+# Load environment variables from .env.dev
+env_file = os.getenv("ENV_FILE", ".env.dev")
+load_dotenv(env_file)
+
 from database import Base
 from models import *  # para registrar todos los modelos
+
+# Get DATABASE_URL and convert to pg8000 driver if PostgreSQL
+DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./api_db.sqlite3")
+if DATABASE_URL.startswith("postgresql://"):
+    DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+pg8000://")
+
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
 config = context.config
+
+# Override sqlalchemy.url with environment variable
+config.set_main_option("sqlalchemy.url", DATABASE_URL)
 
 # Interpret the config file for Python logging.
 # This line sets up loggers basically.

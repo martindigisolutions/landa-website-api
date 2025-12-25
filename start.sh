@@ -1,13 +1,10 @@
 #!/bin/bash
 # ============================================
 # Startup script for Landa Beauty Supply API
-# Runs migrations and then starts the app
 # ============================================
 
-set -e
-
 echo "[START] Running database migrations..."
-python -m alembic upgrade head || echo "[WARN] Migrations failed or already up to date"
+python -m alembic upgrade head && echo "[OK] Migrations completed" || echo "[WARN] Migrations failed - continuing anyway"
 
-echo "[START] Starting application..."
+echo "[START] Starting Landa Beauty Supply API..."
 exec python main.py

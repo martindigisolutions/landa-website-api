@@ -9,6 +9,7 @@ from typing import Sequence, Union
 
 from alembic import op
 import sqlalchemy as sa
+from sqlalchemy import inspect
 
 
 # revision identifiers, used by Alembic.
@@ -19,8 +20,13 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    # Add weight_lbs column to product_variants table
-    op.add_column('product_variants', sa.Column('weight_lbs', sa.Float(), nullable=True))
+    # Check if column already exists before adding
+    conn = op.get_bind()
+    inspector = inspect(conn)
+    columns = [col['name'] for col in inspector.get_columns('product_variants')]
+    
+    if 'weight_lbs' not in columns:
+        op.add_column('product_variants', sa.Column('weight_lbs', sa.Float(), nullable=True))
 
 
 def downgrade() -> None:
