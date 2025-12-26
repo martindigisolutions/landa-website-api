@@ -111,6 +111,12 @@ def update_user_profile(user_id: int, updates: UserUpdate, db: Session):
         raise HTTPException(status_code=404, detail="User not found")
 
     update_data = updates.dict(exclude_unset=True)
+    
+    # Handle password separately - hash it and use the correct field name
+    if "password" in update_data:
+        password = update_data.pop("password")
+        user.hashed_password = get_password_hash(password)
+    
     for field, value in update_data.items():
         setattr(user, field, value)
 
