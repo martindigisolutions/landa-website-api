@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta
 from fastapi import HTTPException, Depends
 from jose import jwt, JWTError
-from passlib.context import CryptContext
+import bcrypt
 from sqlalchemy.orm import Session
 from sqlalchemy import or_
 from fastapi.security import OAuth2PasswordBearer
@@ -14,21 +14,29 @@ from utils import send_email
 from security import create_reset_token
 
 oauth2_scheme = None  # Defined in main auth.py for dependency injection
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
 
 def get_password_hash(password: str) -> str:
-    return pwd_context.hash(password)
+    """Hash a password using bcrypt directly"""
+    password_bytes = password.encode('utf-8')
+    salt = bcrypt.gensalt()
+    return bcrypt.hashpw(password_bytes, salt).decode('utf-8')
+
 
 def verify_password(plain: str, hashed: str) -> bool:
     """
-    Verify a password against a hash.
-    Returns False if hash format is invalid (e.g., SHA256 from temp passwords).
+    Verify a password against a hash using bcrypt directly.
+    Returns False if hash format is invalid.
     """
     try:
-        return pwd_context.verify(plain, hashed)
+        # Check if it's a valid bcrypt hash
+        if not hashed or not hashed.startswith(('$2a$', '$2b$', '$2y$')):
+            return False
+        plain_bytes = plain.encode('utf-8')
+        hashed_bytes = hashed.encode('utf-8')
+        return bcrypt.checkpw(plain_bytes, hashed_bytes)
     except Exception:
-        # Hash format not recognized (e.g., SHA256 from single access token users)
-        # These users should login via their access link, not regular login
+        # Any error (invalid hash format, etc.) = invalid password
         return False
 
 def create_access_token(data: dict, expires_delta: timedelta = None):

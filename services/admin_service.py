@@ -1271,10 +1271,11 @@ def generate_temp_password() -> str:
 
 
 def get_password_hash(password: str) -> str:
-    """Hash a password using bcrypt"""
-    from passlib.context import CryptContext
-    pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-    return pwd_context.hash(password)
+    """Hash a password using bcrypt directly"""
+    import bcrypt
+    password_bytes = password.encode('utf-8')
+    salt = bcrypt.gensalt()
+    return bcrypt.hashpw(password_bytes, salt).decode('utf-8')
 
 
 def create_user_admin(data: UserAdminCreate, db: Session) -> UserAdminCreatedResponse:
