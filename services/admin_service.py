@@ -1271,8 +1271,10 @@ def generate_temp_password() -> str:
 
 
 def get_password_hash(password: str) -> str:
-    """Hash a password using SHA256 (for temp passwords only)"""
-    return hashlib.sha256(password.encode()).hexdigest()
+    """Hash a password using bcrypt"""
+    from passlib.context import CryptContext
+    pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+    return pwd_context.hash(password)
 
 
 def create_user_admin(data: UserAdminCreate, db: Session) -> UserAdminCreatedResponse:

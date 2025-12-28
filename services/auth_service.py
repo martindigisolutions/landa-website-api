@@ -20,7 +20,16 @@ def get_password_hash(password: str) -> str:
     return pwd_context.hash(password)
 
 def verify_password(plain: str, hashed: str) -> bool:
-    return pwd_context.verify(plain, hashed)
+    """
+    Verify a password against a hash.
+    Returns False if hash format is invalid (e.g., SHA256 from temp passwords).
+    """
+    try:
+        return pwd_context.verify(plain, hashed)
+    except Exception:
+        # Hash format not recognized (e.g., SHA256 from single access token users)
+        # These users should login via their access link, not regular login
+        return False
 
 def create_access_token(data: dict, expires_delta: timedelta = None):
     to_encode = data.copy()

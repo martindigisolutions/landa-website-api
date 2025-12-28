@@ -3,6 +3,11 @@ import sys
 import traceback
 import logging
 from contextlib import asynccontextmanager
+from dotenv import load_dotenv
+
+# Load .env file early
+env_file = os.getenv("ENV_FILE", ".env.dev")
+load_dotenv(env_file)
 
 # Configure logging for CloudWatch
 logging.basicConfig(
@@ -197,6 +202,7 @@ def health_check():
             "version": "1.0.2"
         }
     }
+
 
 # Enable CORS
 allowed_origins = os.getenv("ALLOWED_ORIGINS", "http://localhost:3000").split(",")

@@ -1,6 +1,11 @@
 import os
+from dotenv import load_dotenv
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, declarative_base
+
+# Load .env file before reading DATABASE_URL
+env_file = os.getenv("ENV_FILE", ".env.dev")
+load_dotenv(env_file)
 
 # Use DATABASE_URL from environment, fallback to SQLite for local development
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./api_db.sqlite3")
