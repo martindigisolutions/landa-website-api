@@ -452,9 +452,12 @@ class ProductBulkUpdateResponse(BaseModel):
 class OrderItemResponse(BaseModel):
     id: int
     product_id: int
+    variant_id: Optional[int] = None
     product_name: str
+    variant_name: Optional[str] = None
     quantity: int
     price: float
+    image_url: Optional[str] = None  # Variant image if available, otherwise product image
 
     class Config:
         from_attributes = True

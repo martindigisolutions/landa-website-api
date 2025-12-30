@@ -1159,13 +1159,28 @@ def get_order(order_id: int, db: Session) -> OrderAdminResponse:
     
     items = []
     for item in order.items:
-        product_name = item.product.name if item.product else "Unknown"
+        product = item.product
+        variant = item.variant
+        
+        product_name = product.name if product else "Unknown"
+        variant_name = item.variant_name or (variant.name if variant else None)
+        
+        # Use variant image if available, otherwise product image
+        image_url = None
+        if variant and variant.image_url:
+            image_url = variant.image_url
+        elif product:
+            image_url = product.image_url
+        
         items.append(OrderItemResponse(
             id=item.id,
             product_id=item.product_id,
+            variant_id=item.variant_id,
             product_name=product_name,
+            variant_name=variant_name,
             quantity=item.quantity,
-            price=item.price
+            price=item.price,
+            image_url=image_url
         ))
     
     return OrderAdminResponse(

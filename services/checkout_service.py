@@ -564,16 +564,33 @@ def get_order_detail(order_id: str, user_id: str, db: Session):
     # Por ahora, tax = 0 (puede ajustarse según reglas de negocio)
     tax = 0.0
     
-    # Construir los items con información del producto
+    # Construir los items con información del producto y variante
     items_detail = []
     for item in order.items:
         product = db.query(Product).filter(Product.id == item.product_id).first()
+        variant = db.query(ProductVariant).filter(ProductVariant.id == item.variant_id).first() if item.variant_id else None
+        
+        # Product name (parent product only)
+        product_name = product.name if product else "Unknown Product"
+        
+        # Variant name (from frozen data or current variant)
+        variant_name = item.variant_name or (variant.name if variant else None)
+        
+        # Use variant image if available, otherwise product image
+        image_url = None
+        if variant and variant.image_url:
+            image_url = variant.image_url
+        elif product:
+            image_url = product.image_url
+        
         items_detail.append({
             "product_id": item.product_id,
-            "name": product.name if product else "Unknown Product",
+            "variant_id": item.variant_id,
+            "product_name": product_name,
+            "variant_name": variant_name,
             "quantity": item.quantity,
             "price": item.price,
-            "image_url": product.image_url if product else None
+            "image_url": image_url
         })
     
     # Construir la dirección

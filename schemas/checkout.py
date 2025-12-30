@@ -109,10 +109,12 @@ class AddressDetail(BaseModel):
 
 class OrderItemDetail(BaseModel):
     product_id: int
-    name: str
+    variant_id: Optional[int] = None
+    product_name: str  # Parent product name only
+    variant_name: Optional[str] = None  # Variant name (null if no variant)
     quantity: int
     price: float
-    image_url: Optional[str] = None
+    image_url: Optional[str] = None  # Variant image if available, otherwise product image
 
 
 class OrderDetailResponse(BaseModel):
