@@ -435,25 +435,61 @@ def list_categories(db: Session) -> List[CategoryGroupResponse]:
 def create_product(data: ProductCreate, db: Session) -> ProductAdminResponse:
     """Create a new product with optional variant groups and categories.
     Products are created with stock=0 and is_in_stock=False.
-    Use inventory endpoints to update stock."""
+    Use inventory endpoints to update stock.
+    
+    If a product with the same SKU exists but is inactive (soft-deleted),
+    it will be reactivated and updated with the new data instead of creating a duplicate."""
     # Extract variant groups and categories before creating product
     variant_groups_data = data.variant_groups
     categories_data = data.categories
     product_data = data.model_dump(exclude={'variant_groups', 'categories'})
     
-    # Force stock=0 and is_in_stock=False for new products
-    # Stock is managed via inventory endpoints
-    product_data['stock'] = 0
-    product_data['is_in_stock'] = False
+    # Check if a soft-deleted product with the same SKU exists
+    existing_inactive = db.query(Product).filter(
+        Product.seller_sku == data.seller_sku,
+        Product.active == False
+    ).first()
     
-    # If variant groups provided, set has_variants to True
-    if variant_groups_data:
-        product_data['has_variants'] = True
-    
-    product = Product(**product_data)
-    db.add(product)
-    db.commit()
-    db.refresh(product)
+    if existing_inactive:
+        # Reactivate the soft-deleted product and update its data
+        product_data['active'] = True
+        product_data['stock'] = 0
+        product_data['is_in_stock'] = False
+        
+        # If variant groups provided, set has_variants to True
+        if variant_groups_data:
+            product_data['has_variants'] = True
+        
+        # Update all fields
+        for field, value in product_data.items():
+            setattr(existing_inactive, field, value)
+        
+        # Clear existing variant groups (will be replaced if new ones provided)
+        if variant_groups_data:
+            for group in existing_inactive.variant_groups:
+                db.delete(group)
+        
+        # Clear existing categories (will be replaced if new ones provided)
+        if categories_data:
+            db.query(ProductCategory).filter(ProductCategory.product_id == existing_inactive.id).delete()
+        
+        db.commit()
+        db.refresh(existing_inactive)
+        product = existing_inactive
+    else:
+        # Force stock=0 and is_in_stock=False for new products
+        # Stock is managed via inventory endpoints
+        product_data['stock'] = 0
+        product_data['is_in_stock'] = False
+        
+        # If variant groups provided, set has_variants to True
+        if variant_groups_data:
+            product_data['has_variants'] = True
+        
+        product = Product(**product_data)
+        db.add(product)
+        db.commit()
+        db.refresh(product)
     
     # Create variant groups and variants if provided
     if variant_groups_data:
