@@ -484,6 +484,10 @@ def _merge_guest_cart_into_user_cart(db: Session, guest_cart: Cart, user_cart: C
             )
             db.add(new_item)
     
+    # Delete any cart locks associated with the guest cart first
+    # (to avoid NOT NULL constraint violation on cart_id)
+    db.query(CartLock).filter(CartLock.cart_id == guest_cart.id).delete()
+    
     # Delete guest cart (cascade deletes items)
     db.delete(guest_cart)
     
