@@ -1038,7 +1038,11 @@ def delete_variant_group(group_id: int, db: Session) -> dict:
 
 
 def bulk_delete_variants(data: VariantBulkDelete, db: Session) -> VariantBulkDeleteResponse:
-    """Delete multiple variants at once"""
+    """
+    Delete multiple variants at once.
+    - If variant is in any order: soft delete (active=False) to preserve history
+    - If variant has no orders: hard delete (remove completely)
+    """
     deleted_count = 0
     errors = []
     affected_products = set()
@@ -1052,16 +1056,33 @@ def bulk_delete_variants(data: VariantBulkDelete, db: Session) -> VariantBulkDel
             ))
             continue
         
+        if not variant.active:
+            errors.append(VariantBulkDeleteError(
+                id=variant_id,
+                error="Variant already deleted"
+            ))
+            continue
+        
         try:
             # Track affected product
             group = db.query(ProductVariantGroup).filter(ProductVariantGroup.id == variant.group_id).first()
             if group:
                 affected_products.add(group.product_id)
             
-            db.delete(variant)
+            # Check if variant is referenced in any order
+            has_orders = db.query(OrderItem).filter(OrderItem.variant_id == variant_id).first() is not None
+            
+            if has_orders:
+                # Soft delete: variant is in orders, keep for history
+                variant.active = False
+            else:
+                # Hard delete: no orders, safe to remove completely
+                db.delete(variant)
+            
             db.flush()
             deleted_count += 1
         except Exception as e:
+            db.rollback()
             errors.append(VariantBulkDeleteError(
                 id=variant_id,
                 error=str(e)
@@ -1072,12 +1093,15 @@ def bulk_delete_variants(data: VariantBulkDelete, db: Session) -> VariantBulkDel
         product = db.query(Product).filter(Product.id == product_id).first()
         if product:
             product.updated_at = datetime.utcnow()
-            # Check if product still has variants
-            remaining_variants = db.query(ProductVariant).join(ProductVariantGroup).filter(
-                ProductVariantGroup.product_id == product.id
+            # Check if product still has ACTIVE variants
+            remaining_active_variants = db.query(ProductVariant).join(ProductVariantGroup).filter(
+                ProductVariantGroup.product_id == product.id,
+                ProductVariant.active == True
             ).count()
-            if remaining_variants == 0:
+            if remaining_active_variants == 0:
                 product.has_variants = False
+            # Recalculate stock based on active variants only
+            _recalculate_product_stock(product, db)
     
     db.commit()
     
