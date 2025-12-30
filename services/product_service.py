@@ -91,7 +91,15 @@ def _resolve_related_products(
 
 
 def get_categories(db: Session, lang: str = "es") -> List[CategoryGroupPublic]:
-    """Get all category groups with their categories (localized)"""
+    """Get all category groups with their categories (localized).
+    
+    Only returns categories that have at least one product associated.
+    Only returns groups that have at least one category with products.
+    """
+    # Get all category IDs that have at least one product
+    categories_with_products = db.query(ProductCategory.category_id).distinct().all()
+    category_ids_with_products = {cat_id for (cat_id,) in categories_with_products}
+    
     groups = db.query(CategoryGroup).order_by(CategoryGroup.display_order, CategoryGroup.name).all()
     
     result = []
@@ -99,7 +107,8 @@ def get_categories(db: Session, lang: str = "es") -> List[CategoryGroupPublic]:
         # Only include groups that should show in filters
         if not group.show_in_filters:
             continue
-            
+        
+        # Only include categories that have products
         categories = [
             CategoryPublic(
                 id=cat.id,
@@ -109,9 +118,10 @@ def get_categories(db: Session, lang: str = "es") -> List[CategoryGroupPublic]:
                 icon=cat.icon
             )
             for cat in sorted(group.categories, key=lambda c: (c.display_order, c.name))
+            if cat.id in category_ids_with_products  # Only categories with products
         ]
         
-        # Only include groups with categories
+        # Only include groups with categories (that have products)
         if categories:
             result.append(CategoryGroupPublic(
                 id=group.id,
