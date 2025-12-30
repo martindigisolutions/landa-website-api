@@ -385,37 +385,110 @@ def get_or_create_cart(
     """
     Get existing cart or create a new one.
     Priority: user_id > session_id
+    
+    If an authenticated user accesses a guest cart (via session_id),
+    the guest cart is automatically merged/assigned to the user.
+    This ensures the user always sees the same cart across devices.
     """
-    cart = None
+    user_cart = None
+    guest_cart = None
     
-    # Try to find by user_id first
+    # Try to find user's cart first
     if user:
-        cart = db.query(Cart).filter(Cart.user_id == user.id).first()
+        user_cart = db.query(Cart).filter(Cart.user_id == user.id).first()
     
-    # If no user cart, try session_id
-    if not cart and session_id:
-        cart = db.query(Cart).filter(
+    # Try to find guest cart by session_id
+    if session_id:
+        guest_cart = db.query(Cart).filter(
             Cart.session_id == session_id,
             Cart.user_id == None
         ).first()
     
-    # Create new cart if none found
-    if not cart:
-        cart = Cart(
-            user_id=user.id if user else None,
-            session_id=session_id if not user else None,
-            expires_at=_get_expiry_date(user is not None)
-        )
-        db.add(cart)
-        db.commit()
-        db.refresh(cart)
+    # Handle the different cases
+    if user:
+        # Authenticated user
+        if user_cart and guest_cart:
+            # Both carts exist - merge guest into user cart
+            _merge_guest_cart_into_user_cart(db, guest_cart, user_cart)
+            cart = user_cart
+        elif user_cart:
+            # Only user cart exists
+            cart = user_cart
+        elif guest_cart:
+            # Only guest cart exists - assign to user
+            guest_cart.user_id = user.id
+            guest_cart.session_id = None  # Clear session_id
+            guest_cart.expires_at = _get_expiry_date(True)
+            guest_cart.updated_at = datetime.utcnow()
+            db.commit()
+            cart = guest_cart
+        else:
+            # No cart exists - create new user cart
+            cart = Cart(
+                user_id=user.id,
+                expires_at=_get_expiry_date(True)
+            )
+            db.add(cart)
+            db.commit()
+            db.refresh(cart)
     else:
-        # Update expiry on access
-        cart.expires_at = _get_expiry_date(user is not None)
-        cart.updated_at = datetime.utcnow()
-        db.commit()
+        # Guest user
+        if guest_cart:
+            cart = guest_cart
+            cart.expires_at = _get_expiry_date(False)
+            cart.updated_at = datetime.utcnow()
+            db.commit()
+        else:
+            # Create new guest cart
+            cart = Cart(
+                session_id=session_id,
+                expires_at=_get_expiry_date(False)
+            )
+            db.add(cart)
+            db.commit()
+            db.refresh(cart)
     
     return cart
+
+
+def _merge_guest_cart_into_user_cart(db: Session, guest_cart: Cart, user_cart: Cart) -> None:
+    """
+    Merge items from guest cart into user cart.
+    Guest quantities take priority on conflicts.
+    Guest cart is deleted after merge.
+    """
+    from datetime import datetime
+    
+    for guest_item in guest_cart.items:
+        # Check if item already exists in user cart
+        existing_item = db.query(CartItem).filter(
+            CartItem.cart_id == user_cart.id,
+            CartItem.product_id == guest_item.product_id,
+            CartItem.variant_id == guest_item.variant_id
+        ).first()
+        
+        if existing_item:
+            # Update quantity (use max of both)
+            existing_item.quantity = max(existing_item.quantity, guest_item.quantity)
+            existing_item.updated_at = datetime.utcnow()
+        else:
+            # Add new item to user cart
+            new_item = CartItem(
+                cart_id=user_cart.id,
+                product_id=guest_item.product_id,
+                variant_id=guest_item.variant_id,
+                quantity=guest_item.quantity
+            )
+            db.add(new_item)
+    
+    # Delete guest cart (cascade deletes items)
+    db.delete(guest_cart)
+    
+    # Update user cart
+    user_cart.expires_at = _get_expiry_date(True)
+    user_cart.updated_at = datetime.utcnow()
+    
+    db.commit()
 
 
 def get_cart(
