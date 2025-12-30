@@ -281,6 +281,9 @@ def get_products(
     """
     query = db.query(Product)
     
+    # Only show active products (soft deleted products are excluded)
+    query = query.filter(Product.active == True)
+    
     # Handle similar_to filter FIRST - restricts to products in similar_products array
     if similar_to:
         # Try to find the source product by ID first (if numeric), then by SKU
@@ -407,7 +410,10 @@ def get_products(
 
 def get_product_by_id(db: Session, product_id: int, lang: str = "es") -> ProductPublic:
     """Get a single product by ID with localization and resolved related products"""
-    product = db.query(Product).filter(Product.id == product_id).first()
+    product = db.query(Product).filter(
+        Product.id == product_id,
+        Product.active == True  # Exclude soft-deleted products
+    ).first()
     if not product:
         raise HTTPException(status_code=404, detail="Product not found")
     return _product_to_public(product, lang, db)  # Pass db to resolve related products
@@ -415,7 +421,10 @@ def get_product_by_id(db: Session, product_id: int, lang: str = "es") -> Product
 
 def get_product_by_sku(db: Session, seller_sku: str, lang: str = "es") -> ProductPublic:
     """Get a single product by seller SKU with localization and resolved related products"""
-    product = db.query(Product).filter(Product.seller_sku == seller_sku).first()
+    product = db.query(Product).filter(
+        Product.seller_sku == seller_sku,
+        Product.active == True  # Exclude soft-deleted products
+    ).first()
     if not product:
         raise HTTPException(status_code=404, detail="Product not found")
     return _product_to_public(product, lang, db)  # Pass db to resolve related products

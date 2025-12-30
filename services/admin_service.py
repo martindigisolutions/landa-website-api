@@ -744,18 +744,45 @@ def get_product(product_id: int, db: Session) -> ProductAdminResponse:
 
 
 def delete_product(product_id: int, db: Session) -> dict:
-    """Delete a product"""
+    """
+    Delete a product.
+    - If product or its variants are in any order: soft delete (active=False)
+    - If product has no orders: hard delete
+    """
     product = db.query(Product).filter(Product.id == product_id).first()
     if not product:
         raise HTTPException(status_code=404, detail="Product not found")
     
-    db.delete(product)
-    db.commit()
-    return {"msg": f"Product '{product.name}' deleted successfully"}
+    if not product.active:
+        raise HTTPException(status_code=400, detail="Product already deleted")
+    
+    # Check if product is in any order (directly or via variants)
+    has_direct_orders = db.query(OrderItem).filter(
+        OrderItem.product_id == product_id
+    ).first() is not None
+    
+    if has_direct_orders:
+        # Soft delete: product is in orders, keep for history
+        product.active = False
+        # Also soft delete all variants
+        for group in product.variant_groups:
+            for variant in group.variants:
+                variant.active = False
+        db.commit()
+        return {"msg": f"Product '{product.name}' deactivated (has order history)"}
+    else:
+        # Hard delete: no orders, safe to remove
+        db.delete(product)
+        db.commit()
+        return {"msg": f"Product '{product.name}' deleted successfully"}
 
 
 def bulk_delete_products(data: ProductBulkDelete, db: Session) -> ProductBulkDeleteResponse:
-    """Delete multiple products at once"""
+    """
+    Delete multiple products at once.
+    - If product is in any order: soft delete (active=False)
+    - If product has no orders: hard delete
+    """
     deleted_count = 0
     errors = []
     
@@ -768,8 +795,29 @@ def bulk_delete_products(data: ProductBulkDelete, db: Session) -> ProductBulkDel
             ))
             continue
         
+        if not product.active:
+            errors.append(ProductBulkDeleteError(
+                id=product_id,
+                error="Product already deleted"
+            ))
+            continue
+        
         try:
-            db.delete(product)
+            # Check if product is in any order
+            has_orders = db.query(OrderItem).filter(
+                OrderItem.product_id == product_id
+            ).first() is not None
+            
+            if has_orders:
+                # Soft delete
+                product.active = False
+                for group in product.variant_groups:
+                    for variant in group.variants:
+                        variant.active = False
+            else:
+                # Hard delete
+                db.delete(product)
+            
             db.commit()
             deleted_count += 1
         except Exception as e:

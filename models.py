@@ -85,6 +85,9 @@ class Product(Base):
     bestseller_order = Column(Integer, default=0)  # Order for bestseller section (0 = not featured, >0 = position)
     recommended_order = Column(Integer, default=0)  # Order for recommended section (0 = not featured, >0 = position)
     
+    # Soft delete
+    active = Column(Boolean, default=True)  # False = soft deleted, won't appear in catalog
+    
     # Timestamps
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
