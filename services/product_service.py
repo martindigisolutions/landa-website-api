@@ -272,15 +272,18 @@ def get_products(
     
     # Handle similar_to filter FIRST - restricts to products in similar_products array
     if similar_to:
-        # Try to find the source product by SKU first, then by ID
-        source_product = db.query(Product).filter(Product.seller_sku == similar_to).first()
+        # Try to find the source product by ID first (if numeric), then by SKU
+        # This ensures consistency with /products/{id} endpoint behavior
+        source_product = None
+        try:
+            product_id = int(similar_to)
+            source_product = db.query(Product).filter(Product.id == product_id).first()
+        except ValueError:
+            pass
+        
+        # If not found by ID, try by SKU
         if not source_product:
-            # Try by ID
-            try:
-                product_id = int(similar_to)
-                source_product = db.query(Product).filter(Product.id == product_id).first()
-            except ValueError:
-                pass
+            source_product = db.query(Product).filter(Product.seller_sku == similar_to).first()
         
         if not source_product:
             raise HTTPException(status_code=404, detail=f"Product '{similar_to}' not found")
