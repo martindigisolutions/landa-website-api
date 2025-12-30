@@ -20,12 +20,11 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     # Add active column to products table with default True
-    # Using server_default for both SQLite and PostgreSQL compatibility
+    # Works on both SQLite and PostgreSQL
     op.add_column('products', sa.Column('active', sa.Boolean(), 
                                         nullable=False, 
-                                        server_default=sa.text('1')))
+                                        server_default=sa.text('TRUE')))
 
 
 def downgrade() -> None:
     op.drop_column('products', 'active')
-
