@@ -222,10 +222,13 @@ def _build_cart_response(cart: Cart, db: Session, lang: str = "es") -> CartRespo
     
     summary = _build_cart_summary(cart, db)
     
-    # Calculate shipping
+    # Calculate shipping (0 for pickup)
     shipping_fee = 0.0
     shipping_incentive_data = None
-    if cart_items_for_shipping:
+    is_pickup = cart.is_pickup or False
+    
+    if not is_pickup and cart_items_for_shipping:
+        # Only calculate shipping for delivery, not pickup
         try:
             shipping_fee = calculate_shipping_cost(cart_items_for_shipping, db)
             shipping_incentive_data = get_shipping_incentive(cart_items_for_shipping, db)
@@ -256,7 +259,7 @@ def _build_cart_response(cart: Cart, db: Session, lang: str = "es") -> CartRespo
         subtotal=summary.subtotal,
         shipping_fee=shipping_fee,
         address=tax_address,
-        is_pickup=cart.is_pickup or False
+        is_pickup=is_pickup
     )
     
     # Calculate total
