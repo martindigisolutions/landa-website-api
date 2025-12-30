@@ -1050,10 +1050,11 @@ def get_cart_recommendations(
     # Get the most common SKUs (sorted by frequency, then limit)
     top_skus = [sku for sku, _ in sku_counter.most_common(limit * 2)]  # Get extra in case some don't exist
     
-    # Fetch products by seller_sku
+    # Fetch products by seller_sku (only active products)
     recommended_products = db.query(Product).filter(
         Product.seller_sku.in_(top_skus),
-        Product.id.notin_(cart_product_ids)  # Double-check exclusion
+        Product.id.notin_(cart_product_ids),  # Double-check exclusion
+        Product.active == True  # Exclude soft-deleted products
     ).all()
     
     # Create a map of sku -> product for sorting

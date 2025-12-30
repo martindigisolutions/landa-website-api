@@ -59,10 +59,11 @@ def _resolve_related_products(
     if not skus:
         return []
     
-    # Get all products that match the SKUs and are in stock
+    # Get all products that match the SKUs, are in stock, and are active
     products = db.query(Product).filter(
         Product.seller_sku.in_(skus),
-        Product.is_in_stock == True
+        Product.is_in_stock == True,
+        Product.active == True  # Exclude soft-deleted products
     ).all()
     
     # Create a lookup dict by seller_sku

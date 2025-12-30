@@ -715,8 +715,11 @@ def list_products(
     brand: Optional[str] = None,
     is_in_stock: Optional[bool] = None
 ) -> List[ProductAdminResponse]:
-    """List all products with optional filters"""
+    """List all products with optional filters (excludes soft-deleted)"""
     query = db.query(Product)
+    
+    # Exclude soft-deleted products
+    query = query.filter(Product.active == True)
     
     if search:
         search_filter = f"%{search}%"
