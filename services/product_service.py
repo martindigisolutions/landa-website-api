@@ -3,7 +3,8 @@ Product service for public frontend with localization support
 """
 from typing import List, Optional
 from sqlalchemy.orm import Session
-from sqlalchemy import or_
+from sqlalchemy import or_, and_
+from collections import defaultdict
 from fastapi import HTTPException
 
 from models import Product, CategoryGroup, Category, ProductCategory, UserFavorite, User
@@ -331,12 +332,34 @@ def get_products(
         query = query.filter(Product.regular_price <= max_price)
     
     # Filter by category slug(s)
+    # Logic: OR within the same group, AND between different groups
+    # Example: (alizados OR botox) AND (cabello-frizzado)
     if category:
-        query = query.join(ProductCategory).join(Category).filter(Category.slug.in_(category))
+        # Get categories with their group_id
+        categories_with_groups = db.query(Category.slug, Category.group_id).filter(
+            Category.slug.in_(category)
+        ).all()
+        
+        # Group categories by their group_id
+        categories_by_group = defaultdict(list)
+        for cat_slug, group_id in categories_with_groups:
+            categories_by_group[group_id].append(cat_slug)
+        
+        # Build AND condition between groups (OR within each group)
+        # Each group needs a separate subquery to check if product has any category from that group
+        for group_id, slugs in categories_by_group.items():
+            # Subquery: product IDs that have at least one category from this group
+            subquery = db.query(ProductCategory.product_id).join(Category).filter(
+                Category.slug.in_(slugs)
+            ).subquery()
+            query = query.filter(Product.id.in_(subquery))
     
     # Filter by category group slug
     if category_group:
-        query = query.join(ProductCategory).join(Category).join(CategoryGroup).filter(CategoryGroup.slug == category_group)
+        subquery = db.query(ProductCategory.product_id).join(Category).join(CategoryGroup).filter(
+            CategoryGroup.slug == category_group
+        ).subquery()
+        query = query.filter(Product.id.in_(subquery))
     
     # Get total count
     total_items = query.count()
