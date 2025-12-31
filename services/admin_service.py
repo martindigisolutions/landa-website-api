@@ -464,10 +464,13 @@ def create_product(data: ProductCreate, db: Session) -> ProductAdminResponse:
         for field, value in product_data.items():
             setattr(existing_inactive, field, value)
         
-        # Clear existing variant groups (will be replaced if new ones provided)
+        # Soft-delete existing variants (will be replaced if new ones provided)
+        # We can't hard-delete because they may be referenced in order_items
         if variant_groups_data:
             for group in existing_inactive.variant_groups:
-                db.delete(group)
+                for variant in group.variants:
+                    variant.active = False
+                    variant.updated_at = datetime.utcnow()
         
         # Clear existing categories (will be replaced if new ones provided)
         if categories_data:
