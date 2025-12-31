@@ -464,14 +464,6 @@ def create_product(data: ProductCreate, db: Session) -> ProductAdminResponse:
         for field, value in product_data.items():
             setattr(existing_inactive, field, value)
         
-        # Soft-delete existing variants (will be replaced if new ones provided)
-        # We can't hard-delete because they may be referenced in order_items
-        if variant_groups_data:
-            for group in existing_inactive.variant_groups:
-                for variant in group.variants:
-                    variant.active = False
-                    variant.updated_at = datetime.utcnow()
-        
         # Clear existing categories (will be replaced if new ones provided)
         if categories_data:
             db.query(ProductCategory).filter(ProductCategory.product_id == existing_inactive.id).delete()
@@ -479,6 +471,82 @@ def create_product(data: ProductCreate, db: Session) -> ProductAdminResponse:
         db.commit()
         db.refresh(existing_inactive)
         product = existing_inactive
+        
+        # Handle variant groups for reactivated product
+        if variant_groups_data:
+            # Get all existing variants across all groups for this product
+            existing_variants_map = {}  # key: (seller_sku or name) -> variant
+            for group in existing_inactive.variant_groups:
+                for variant in group.variants:
+                    # Index by seller_sku if available, otherwise by name
+                    if variant.seller_sku:
+                        existing_variants_map[f"sku:{variant.seller_sku}"] = variant
+                    existing_variants_map[f"name:{variant.name}"] = variant
+            
+            # First, soft-delete all existing variants (we'll reactivate matching ones)
+            for group in existing_inactive.variant_groups:
+                for variant in group.variants:
+                    variant.active = False
+                    variant.updated_at = datetime.utcnow()
+            
+            # Process each new variant group
+            for group_data in variant_groups_data:
+                variants_data = group_data.variants
+                
+                # Try to find existing group with same variant_type, or create new
+                existing_group = None
+                for g in existing_inactive.variant_groups:
+                    if g.variant_type == group_data.variant_type:
+                        existing_group = g
+                        break
+                
+                if existing_group:
+                    # Update existing group
+                    existing_group.name = group_data.name
+                    existing_group.display_order = group_data.display_order
+                    group = existing_group
+                else:
+                    # Create new group
+                    group = ProductVariantGroup(
+                        product_id=product.id,
+                        variant_type=group_data.variant_type,
+                        name=group_data.name,
+                        display_order=group_data.display_order
+                    )
+                    db.add(group)
+                    db.commit()
+                    db.refresh(group)
+                
+                # Process variants
+                for variant_data in variants_data:
+                    variant_dict = variant_data.model_dump()
+                    if not variant_dict.get('variant_value'):
+                        variant_dict['variant_value'] = variant_dict['name']
+                    
+                    # Try to find existing variant by SKU or name
+                    existing_variant = None
+                    if variant_dict.get('seller_sku'):
+                        existing_variant = existing_variants_map.get(f"sku:{variant_dict['seller_sku']}")
+                    if not existing_variant and variant_dict.get('name'):
+                        existing_variant = existing_variants_map.get(f"name:{variant_dict['name']}")
+                    
+                    if existing_variant:
+                        # Reactivate and update existing variant
+                        existing_variant.active = True
+                        existing_variant.group_id = group.id
+                        for key, value in variant_dict.items():
+                            setattr(existing_variant, key, value)
+                        existing_variant.updated_at = datetime.utcnow()
+                    else:
+                        # Create new variant
+                        variant = ProductVariant(
+                            group_id=group.id,
+                            **variant_dict
+                        )
+                        db.add(variant)
+            
+            db.commit()
+            db.refresh(product)
     else:
         # Force stock=0 and is_in_stock=False for new products
         # Stock is managed via inventory endpoints
@@ -493,35 +561,35 @@ def create_product(data: ProductCreate, db: Session) -> ProductAdminResponse:
         db.add(product)
         db.commit()
         db.refresh(product)
-    
-    # Create variant groups and variants if provided
-    if variant_groups_data:
-        for group_data in variant_groups_data:
-            variants_data = group_data.variants
-            group = ProductVariantGroup(
-                product_id=product.id,
-                variant_type=group_data.variant_type,  # REQUIRED
-                name=group_data.name,  # OPTIONAL (category)
-                display_order=group_data.display_order
-            )
-            db.add(group)
-            db.commit()
-            db.refresh(group)
-            
-            # Create variants for this group
-            for variant_data in variants_data:
-                variant_dict = variant_data.model_dump()
-                # Default variant_value to name if not provided
-                if not variant_dict.get('variant_value'):
-                    variant_dict['variant_value'] = variant_dict['name']
-                variant = ProductVariant(
-                    group_id=group.id,
-                    **variant_dict
-                )
-                db.add(variant)
         
-        db.commit()
-        db.refresh(product)
+        # Create variant groups and variants for new product
+        if variant_groups_data:
+            for group_data in variant_groups_data:
+                variants_data = group_data.variants
+                group = ProductVariantGroup(
+                    product_id=product.id,
+                    variant_type=group_data.variant_type,  # REQUIRED
+                    name=group_data.name,  # OPTIONAL (category)
+                    display_order=group_data.display_order
+                )
+                db.add(group)
+                db.commit()
+                db.refresh(group)
+                
+                # Create variants for this group
+                for variant_data in variants_data:
+                    variant_dict = variant_data.model_dump()
+                    # Default variant_value to name if not provided
+                    if not variant_dict.get('variant_value'):
+                        variant_dict['variant_value'] = variant_dict['name']
+                    variant = ProductVariant(
+                        group_id=group.id,
+                        **variant_dict
+                    )
+                    db.add(variant)
+            
+            db.commit()
+            db.refresh(product)
     
     # Process categories if provided
     if categories_data:
