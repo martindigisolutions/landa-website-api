@@ -7,7 +7,7 @@ class User(Base):
     __tablename__ = "users"
 
     id = Column(Integer, primary_key=True, index=True)
-    hashed_password = Column(String, nullable=False)
+    hashed_password = Column(String, nullable=True)  # Nullable for users created via single-access-token
     first_name = Column(String, nullable=True)  # Nullable for partial registration
     last_name = Column(String, nullable=True)   # Nullable for partial registration
     phone = Column(String, unique=True, index=True, nullable=True)  # Nullable for partial registration
@@ -17,6 +17,10 @@ class User(Base):
     user_type = Column(String, nullable=False, default="client")  # values: "stylist", "client"
     registration_complete = Column(Boolean, default=True)  # False for partial registrations
     created_at = Column(DateTime, default=datetime.utcnow)
+    
+    # Password management fields
+    password_requires_update = Column(Boolean, default=False)  # True if user needs to set/update password
+    password_last_updated = Column(DateTime, nullable=True)  # Last time password was changed
     
     # Suspension fields (temporary, reversible)
     is_suspended = Column(Boolean, default=False)

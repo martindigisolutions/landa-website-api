@@ -1650,7 +1650,9 @@ def create_user_admin(data: UserAdminCreate, db: Session) -> UserAdminCreatedRes
         birthdate=data.birthdate,
         user_type=data.user_type,
         registration_complete=is_complete,
-        hashed_password=get_password_hash(temp_password)  # Temp password
+        hashed_password=get_password_hash(temp_password),  # Temp password
+        password_requires_update=True,  # User should set their own password
+        password_last_updated=datetime.utcnow()
     )
     
     try:

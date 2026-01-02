@@ -37,6 +37,11 @@ class UserOut(BaseModel):
     user_type: str
     registration_complete: bool = True
     created_at: Optional[datetime] = None
+    
+    # Password status fields
+    has_password: bool = True  # Computed: True if user has a password set
+    password_requires_update: bool = False  # True if user needs to set/update password
+    password_last_updated: Optional[datetime] = None  # Last time password was changed
 
     class Config:
         from_attributes = True

@@ -116,7 +116,9 @@ def register_user(user: UserCreate, db: Session):
         birthdate=user.birthdate,
         user_type=user.user_type,
         registration_complete=True,
-        hashed_password=hashed
+        hashed_password=hashed,
+        password_last_updated=datetime.utcnow(),
+        password_requires_update=False
     )
     db.add(new_user)
     db.commit()
@@ -129,10 +131,12 @@ def update_user_profile(user_id: int, updates: UserUpdate, db: Session):
 
     update_data = updates.dict(exclude_unset=True)
     
-    # Handle password separately - hash it and use the correct field name
+    # Handle password separately - hash it and update related fields
     if "password" in update_data:
         password = update_data.pop("password")
         user.hashed_password = get_password_hash(password)
+        user.password_last_updated = datetime.utcnow()
+        user.password_requires_update = False  # Clear the flag once password is set
     
     for field, value in update_data.items():
         setattr(user, field, value)
@@ -245,6 +249,8 @@ def reset_password(data: ResetPasswordSchema, db: Session):
         raise HTTPException(status_code=404, detail="User not found")
 
     user.hashed_password = get_password_hash(data.new_password)
+    user.password_last_updated = datetime.utcnow()
+    user.password_requires_update = False  # Clear the flag
     db.add(user)
 
     reset_entry.used = True
@@ -264,5 +270,25 @@ def get_user_by_id(user_id: int, current_user: User, db: Session):
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
-    return user
+    return _user_to_response(user)
+
+
+def _user_to_response(user: User) -> dict:
+    """Convert User model to response dict with computed fields"""
+    return {
+        "id": user.id,
+        "first_name": user.first_name,
+        "last_name": user.last_name,
+        "phone": user.phone,
+        "whatsapp_phone": user.whatsapp_phone,
+        "email": user.email,
+        "birthdate": user.birthdate,
+        "user_type": user.user_type,
+        "registration_complete": user.registration_complete,
+        "created_at": user.created_at,
+        # Password status - computed fields
+        "has_password": user.hashed_password is not None and len(user.hashed_password) > 0,
+        "password_requires_update": user.password_requires_update or False,
+        "password_last_updated": user.password_last_updated,
+    }
 
