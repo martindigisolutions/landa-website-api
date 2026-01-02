@@ -143,7 +143,7 @@ class AddressUpdate(BaseModel):
 
 
 class UpdateAddressRequest(BaseModel):
-    user_id: str
+    user_id: Optional[str] = None  # Deprecated: user_id is now extracted from auth token
     address: AddressUpdate
 
 

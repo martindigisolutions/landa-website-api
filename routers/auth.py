@@ -21,9 +21,20 @@ def register(user: UserCreate, db: Session = Depends(get_db)):
 @router.patch(
     "/users/{user_id}",
     summary="Update user profile",
-    description="Updates user fields like name, phone, email, birthdate, or user type. Only fields provided in the request will be updated."
+    description="Updates user fields like name, phone, email, birthdate, or user type. Only fields provided in the request will be updated. Requires authentication - users can only update their own profile."
 )
-def update_user(user_id: int, updates: UserUpdate, db: Session = Depends(get_db)):
+def update_user(
+    user_id: int, 
+    updates: UserUpdate, 
+    current_user: User = Depends(auth_service.get_current_user),
+    db: Session = Depends(get_db)
+):
+    # Users can only update their own profile (admins can update anyone)
+    if current_user.user_type != "admin" and current_user.id != user_id:
+        raise HTTPException(
+            status_code=403, 
+            detail="You are not authorized to update this user's profile."
+        )
     return auth_service.update_user_profile(user_id, updates, db)
 
 @router.post(
