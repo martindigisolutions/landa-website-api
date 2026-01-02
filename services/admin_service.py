@@ -531,10 +531,14 @@ def create_product(data: ProductCreate, db: Session) -> ProductAdminResponse:
                     db.refresh(group)
                 
                 # Process variants
-                for variant_data in variants_data:
+                for idx, variant_data in enumerate(variants_data):
                     variant_dict = variant_data.model_dump()
                     if not variant_dict.get('variant_value'):
                         variant_dict['variant_value'] = variant_dict['name']
+                    
+                    # Use array index as display_order if not explicitly set or is default 0
+                    if variant_dict.get('display_order', 0) == 0:
+                        variant_dict['display_order'] = idx
                     
                     # Try to find existing variant by SKU or name
                     existing_variant = None
@@ -590,11 +594,14 @@ def create_product(data: ProductCreate, db: Session) -> ProductAdminResponse:
                 db.refresh(group)
                 
                 # Create variants for this group
-                for variant_data in variants_data:
+                for idx, variant_data in enumerate(variants_data):
                     variant_dict = variant_data.model_dump()
                     # Default variant_value to name if not provided
                     if not variant_dict.get('variant_value'):
                         variant_dict['variant_value'] = variant_dict['name']
+                    # Use array index as display_order if not explicitly set
+                    if variant_dict.get('display_order', 0) == 0:
+                        variant_dict['display_order'] = idx
                     variant = ProductVariant(
                         group_id=group.id,
                         **variant_dict
@@ -716,10 +723,14 @@ def update_product(product_id: int, data: ProductUpdate, db: Session) -> Product
                     db.flush()
                 
                 # Process variants - match existing ones to preserve stock
-                for variant_data in variants_data:
+                for idx, variant_data in enumerate(variants_data):
                     variant_dict = variant_data.model_dump(exclude_unset=True)
                     if not variant_dict.get('variant_value') and variant_dict.get('name'):
                         variant_dict['variant_value'] = variant_dict['name']
+                    
+                    # Use array index as display_order if not explicitly set
+                    if 'display_order' not in variant_dict or variant_dict.get('display_order', 0) == 0:
+                        variant_dict['display_order'] = idx
                     
                     # Try to find existing variant by SKU or name
                     existing_variant = None
@@ -1090,10 +1101,14 @@ def bulk_update_products(data: ProductBulkUpdate, db: Session) -> ProductBulkUpd
                             db.flush()
                         
                         # Process variants - match existing ones to preserve stock
-                        for variant_data in variants_data:
+                        for idx, variant_data in enumerate(variants_data):
                             variant_dict = variant_data.model_dump(exclude_unset=True)
                             if not variant_dict.get('variant_value') and variant_dict.get('name'):
                                 variant_dict['variant_value'] = variant_dict['name']
+                            
+                            # Use array index as display_order if not explicitly set
+                            if 'display_order' not in variant_dict or variant_dict.get('display_order', 0) == 0:
+                                variant_dict['display_order'] = idx
                             
                             # Try to find existing variant by SKU or name
                             existing_variant = None
