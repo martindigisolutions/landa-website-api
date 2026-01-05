@@ -13,18 +13,13 @@ terraform {
   }
 
   # Remote state in S3 (RECOMENDADO para producción)
-  # PASO 1: Ejecutar setup-backend.sh para crear bucket y tabla
-  # PASO 2: Descomentar el bloque backend "s3" abajo
-  # PASO 3: Ejecutar terraform init -migrate-state
-  
-  # Descomentar después de ejecutar setup-backend.sh:
-  # backend "s3" {
-  #   bucket         = "landa-terraform-state-prod"
-  #   key            = "prod/apprunner.tfstate"
-  #   region         = "us-west-2"
-  #   encrypt        = true
-  #   dynamodb_table = "landa-terraform-locks"
-  # }
+  backend "s3" {
+    bucket         = "landa-terraform-state-prod"
+    key            = "prod/apprunner.tfstate"
+    region         = "us-west-2"
+    encrypt        = true
+    dynamodb_table = "landa-terraform-locks"
+  }
 }
 
 provider "aws" {
