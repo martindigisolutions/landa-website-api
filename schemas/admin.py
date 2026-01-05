@@ -495,7 +495,10 @@ class OrderAdminResponse(BaseModel):
     address: Optional[RecipientAddress] = None  # Formato TikTok
     status: str
     payment_status: str
-    total: float
+    subtotal: Optional[float] = None  # Sum of all items before taxes and shipping
+    tax: Optional[float] = None  # Tax amount
+    shipping_fee: Optional[float] = None  # Shipping cost
+    total: float  # Final total (subtotal + tax + shipping_fee)
     created_at: datetime
     paid_at: Optional[datetime]
     stripe_payment_intent_id: Optional[str]

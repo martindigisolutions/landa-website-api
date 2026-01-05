@@ -305,14 +305,17 @@ def create_order(
                 "price": reservation.unit_price
             })
         
-        # Create order with frozen totals
+        # Create order with frozen totals from lock
         order = Order(
             session_id=session_id,
             user_id=user_id,
             shipping_method=shipping_method,
             payment_method=payment_method,
             address=address_data,
-            total=total,
+            subtotal=lock.subtotal,
+            tax=lock.tax,
+            shipping_fee=lock.shipping_fee,
+            total=total,  # Use lock.total which matches subtotal + tax + shipping_fee
             status="paid" if payment_method == "stripe" else "pending_verification",
             stripe_payment_intent_id=lock.stripe_payment_intent_id
         )
@@ -391,8 +394,8 @@ def create_order(
     if not valid_items:
         raise HTTPException(status_code=400, detail="No valid items in cart")
     
-    # Calculate total and prepare order items
-    total = 0.0
+    # Calculate subtotal and prepare order items
+    subtotal = 0.0
     order_items_data = []
     
     for item in valid_items:
@@ -400,7 +403,7 @@ def create_order(
         variant = item.variant
         
         price = _get_item_price(product, variant)
-        total += price * item.quantity
+        subtotal += price * item.quantity
         
         order_items_data.append({
             "product_id": product.id,
@@ -410,6 +413,49 @@ def create_order(
             "price": price
         })
     
+    # Calculate shipping and tax
+    from services.shipping_service import calculate_shipping_cost
+    from services.tax_service import TaxService, TaxAddress
+    
+    cart_items_for_shipping = [
+        {"product_id": item_data["product_id"], "variant_id": item_data["variant_id"], "quantity": item_data["quantity"]}
+        for item_data in order_items_data
+    ]
+    
+    is_pickup = data.shipping_method == "pickup"
+    shipping_fee = 0.0
+    if not is_pickup:
+        try:
+            shipping_fee = calculate_shipping_cost(cart_items_for_shipping, db)
+        except Exception:
+            shipping_fee = 0.0
+    
+    # Calculate tax
+    tax = 0.0
+    try:
+        tax_service = TaxService(db)
+        tax_address = None
+        if data.address and data.address.city and data.address.state and data.address.zip:
+            tax_address = TaxAddress(
+                street_number="",
+                street_name=data.address.street or "",
+                city=data.address.city,
+                state=data.address.state,
+                zipcode=data.address.zip
+            )
+        
+        tax_result = tax_service.calculate_tax(
+            subtotal=subtotal,
+            shipping_fee=shipping_fee,
+            address=tax_address,
+            is_pickup=is_pickup
+        )
+        tax = tax_result.tax_amount
+    except Exception:
+        tax = 0.0
+    
+    total = round(subtotal + shipping_fee + tax, 2)
+    
     # Create order
     order = Order(
         session_id=session_id,
@@ -417,6 +463,9 @@ def create_order(
         shipping_method=data.shipping_method,
         payment_method=data.payment_method,
         address=data.address.model_dump(),
+        subtotal=subtotal,
+        tax=tax,
+        shipping_fee=shipping_fee,
         total=total,
         status="pending_payment"
     )

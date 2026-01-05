@@ -163,7 +163,10 @@ class Order(Base):
     payment_method = Column(String)   # "zelle", "stripe", "credit_card", etc.
     address = Column(JSON, nullable=True)  # Guardamos JSON de dirección
     status = Column(String, default="pending")  # pending, paid, canceled, refunded, etc.
-    total = Column(Float)
+    subtotal = Column(Float, nullable=True)  # Sum of all items before taxes and shipping
+    tax = Column(Float, nullable=True)  # Tax amount
+    shipping_fee = Column(Float, nullable=True)  # Shipping cost
+    total = Column(Float)  # Final total (subtotal + tax + shipping_fee)
     created_at = Column(DateTime, default=datetime.utcnow)
     
     # Stripe payment fields
