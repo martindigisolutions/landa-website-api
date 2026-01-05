@@ -97,7 +97,7 @@ def update_payment_method(
     payment_method: str
 ) -> UpdatePaymentMethodResponse:
     """Update payment method in cart"""
-    valid_methods = ["stripe", "zelle"]
+    valid_methods = ["stripe", "zelle", "cashapp", "venmo"]
     
     if payment_method.lower() not in valid_methods:
         return UpdatePaymentMethodResponse(
@@ -400,3 +400,4 @@ def cleanup_expired_locks(db: Session) -> int:
         logger.info(f"Cleaned up {count} expired locks")
     
     return count
+

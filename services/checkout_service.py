@@ -207,7 +207,9 @@ def get_checkout_options(data: CheckoutOptionsRequest, db: Session):
 
     payment_methods = [
         {"id": "stripe", "label": "Credit/Debit Card"},
-        {"id": "zelle", "label": "Zelle (0% Fee)"},
+        {"id": "zelle", "label": "Zelle"},
+        {"id": "cashapp", "label": "Cash App"},
+        {"id": "venmo", "label": "Venmo"},
     ]
 
     if data.shipping_method == "pickup":
@@ -554,6 +556,15 @@ def get_payment_details(order_id: str, db: Session):
         En las notas, escriba: <strong>Order {order_id}</strong></p>
         """
         return {"payment_type": "cashapp", "instructions": html.strip()}
+
+    if order.payment_method == "venmo":
+        html = f"""
+        <p>Tu orden <strong>#{order_id}</strong> ha sido creada.<br>
+        Envíe su pago de <strong>{total}</strong> a través de <strong>Venmo</strong> al usuario:<br>
+        <strong>@beautystore</strong><br>
+        En las notas, escriba: <strong>Order {order_id}</strong></p>
+        """
+        return {"payment_type": "venmo", "instructions": html.strip()}
 
     if order.payment_method == "cash":
         return {
