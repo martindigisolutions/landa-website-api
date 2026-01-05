@@ -600,18 +600,24 @@ def get_order_detail(order_id: str, user_id: str, db: Session):
     if order.user_id != user_id_int:
         raise HTTPException(status_code=403, detail="You don't have permission to view this order")
     
-    # Calcular subtotal, shipping_cost y tax
-    subtotal = sum(item.price * item.quantity for item in order.items)
-    
-    # Determinar el costo de envío basado en el método
-    shipping_cost = 0.0
-    if order.shipping_method == "standard":
-        shipping_cost = 5.99
-    elif order.shipping_method in ["free_shipping", "pickup"]:
+    # Use stored breakdown values if available, otherwise calculate (for old orders)
+    if order.subtotal is not None:
+        subtotal = order.subtotal
+        tax = order.tax or 0.0
+        shipping_cost = order.shipping_fee or 0.0
+    else:
+        # Fallback calculation for old orders (before breakdown was stored)
+        subtotal = sum(item.price * item.quantity for item in order.items)
+        
+        # Determine shipping cost based on method
         shipping_cost = 0.0
-    
-    # Por ahora, tax = 0 (puede ajustarse según reglas de negocio)
-    tax = 0.0
+        if order.shipping_method == "standard":
+            shipping_cost = 5.99
+        elif order.shipping_method in ["free_shipping", "pickup"]:
+            shipping_cost = 0.0
+        
+        # Tax calculation for old orders (default to 0)
+        tax = 0.0
     
     # Construir los items con información del producto y variante
     items_detail = []
