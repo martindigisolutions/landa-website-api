@@ -173,9 +173,14 @@ class Order(Base):
     stripe_payment_intent_id = Column(String, nullable=True, index=True)
     payment_status = Column(String, default="pending")  # pending, processing, completed, failed, refunded
     paid_at = Column(DateTime, nullable=True)
-
+    
+    # Order combination fields
+    combined_group_id = Column(String, nullable=True, index=True)  # ID del grupo de órdenes combinadas
+    combined = Column(Boolean, default=False)  # Flag rápido para saber si está combinada
+    
     user = relationship("User")
     items = relationship("OrderItem", back_populates="order")
+    shipments = relationship("OrderShipment", back_populates="order", cascade="all, delete-orphan")
 
 class OrderItem(Base):
     __tablename__ = "order_items"
@@ -191,6 +196,40 @@ class OrderItem(Base):
     order = relationship("Order", back_populates="items")
     product = relationship("Product")
     variant = relationship("ProductVariant")
+
+
+class OrderShipment(Base):
+    """Individual shipment/package within an order. An order can have multiple shipments."""
+    __tablename__ = "order_shipments"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    order_id = Column(Integer, ForeignKey("orders.id"), nullable=False, index=True)
+    tracking_number = Column(String, nullable=False)  # Tracking number from carrier
+    tracking_url = Column(String, nullable=True)  # Full tracking URL (can be auto-generated)
+    carrier = Column(String, nullable=True)  # Carrier name (USPS, FedEx, UPS, etc.)
+    shipped_at = Column(DateTime, nullable=True)  # When this shipment was sent
+    estimated_delivery = Column(DateTime, nullable=True)  # Estimated delivery date
+    delivered_at = Column(DateTime, nullable=True)  # When this shipment was actually delivered
+    notes = Column(String, nullable=True)  # Additional notes about this shipment
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # Order combination field
+    combined_group_id = Column(String, nullable=True, index=True)  # ID del grupo si es shipment compartido
+    
+    order = relationship("Order", back_populates="shipments")
+
+
+class CombinedOrder(Base):
+    """Tracks which orders are combined together for shared shipping."""
+    __tablename__ = "combined_orders"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    combined_group_id = Column(String, nullable=False, index=True)  # Unique ID for the group
+    order_id = Column(Integer, ForeignKey("orders.id"), nullable=False, index=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    
+    order = relationship("Order")
 
 
 class Application(Base):

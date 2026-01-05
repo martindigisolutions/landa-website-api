@@ -13,8 +13,8 @@ from jose import jwt, JWTError
 from database import get_db
 from models import (
     Application, Product, ProductVariantGroup, ProductVariant, 
-    Order, OrderItem, User, SingleAccessToken,
-    CategoryGroup, Category, ProductCategory, ShippingRule
+    Order, OrderItem, OrderShipment, User, SingleAccessToken,
+    CategoryGroup, Category, ProductCategory, ShippingRule, CombinedOrder
 )
 from schemas.admin import (
     ApplicationCreate, ApplicationUpdate, ApplicationResponse, ApplicationCreatedResponse,
@@ -28,6 +28,9 @@ from schemas.admin import (
     VariantBulkDelete, VariantBulkDeleteResponse, VariantBulkDeleteError,
     OrderAdminResponse, OrderItemResponse, OrderStatusUpdate, PaginatedOrdersResponse,
     RecipientAddress, RecipientAddressDistrictInfo,
+    OrderShipmentResponse, OrderShipmentCreate, OrderShipmentUpdate, OrderShipmentBulkCreate,
+    OrderCombineRequest, OrderCombineResponse, OrderUncombineRequest, OrderUncombineResponse,
+    CombinedOrdersResponse,
     AdminStats,
     UserAdminCreate, UserAdminResponse, UserAdminCreatedResponse, PaginatedUsersResponse,
     SingleAccessTokenCreate, SingleAccessTokenResponse,
@@ -1565,6 +1568,24 @@ def list_orders(
         user = db.query(User).filter(User.id == order.user_id).first() if order.user_id else None
         recipient_address = _transform_address_to_tiktok_format(order.address, user)
         
+        # Build shipments list
+        shipments = [
+            OrderShipmentResponse(
+                id=shipment.id,
+                order_id=shipment.order_id,
+                tracking_number=shipment.tracking_number,
+                tracking_url=shipment.tracking_url,
+                carrier=shipment.carrier,
+                shipped_at=shipment.shipped_at,
+                estimated_delivery=shipment.estimated_delivery,
+                delivered_at=shipment.delivered_at,
+                notes=shipment.notes,
+                created_at=shipment.created_at,
+                updated_at=shipment.updated_at
+            )
+            for shipment in sorted(order.shipments, key=lambda s: s.created_at)
+        ]
+        
         results.append(OrderAdminResponse(
             id=order.id,
             session_id=order.session_id,
@@ -1581,6 +1602,7 @@ def list_orders(
             created_at=order.created_at,
             paid_at=order.paid_at,
             stripe_payment_intent_id=order.stripe_payment_intent_id,
+            shipments=shipments,
             items=items
         ))
     
@@ -1593,12 +1615,8 @@ def list_orders(
     )
 
 
-def get_order(order_id: int, db: Session) -> OrderAdminResponse:
-    """Get a single order by ID"""
-    order = db.query(Order).filter(Order.id == order_id).first()
-    if not order:
-        raise HTTPException(status_code=404, detail="Order not found")
-    
+def _order_to_admin_response(order: Order, db: Session) -> OrderAdminResponse:
+    """Helper function to convert Order to OrderAdminResponse"""
     items = []
     for item in order.items:
         product = item.product
@@ -1607,14 +1625,12 @@ def get_order(order_id: int, db: Session) -> OrderAdminResponse:
         product_name = product.name if product else "Unknown"
         variant_name = item.variant_name or (variant.name if variant else None)
         
-        # Use variant SKU if exists, otherwise product SKU
         seller_sku = None
         if variant and variant.seller_sku:
             seller_sku = variant.seller_sku
         elif product and product.seller_sku:
             seller_sku = product.seller_sku
         
-        # Use variant image if available, otherwise product image
         image_url = None
         if variant and variant.image_url:
             image_url = variant.image_url
@@ -1633,9 +1649,39 @@ def get_order(order_id: int, db: Session) -> OrderAdminResponse:
             image_url=image_url
         ))
     
-    # Transform address to TikTok format
     user = db.query(User).filter(User.id == order.user_id).first() if order.user_id else None
     recipient_address = _transform_address_to_tiktok_format(order.address, user)
+    
+    shipments = []
+    for shipment in sorted(order.shipments, key=lambda s: s.created_at):
+        shared_with = None
+        if shipment.combined_group_id:
+            combined_orders_for_shipment = db.query(CombinedOrder).filter(
+                CombinedOrder.combined_group_id == shipment.combined_group_id
+            ).all()
+            shared_with = [co.order_id for co in combined_orders_for_shipment]
+        
+        shipments.append(OrderShipmentResponse(
+            id=shipment.id,
+            order_id=shipment.order_id,
+            tracking_number=shipment.tracking_number,
+            tracking_url=shipment.tracking_url,
+            carrier=shipment.carrier,
+            shipped_at=shipment.shipped_at,
+            estimated_delivery=shipment.estimated_delivery,
+            delivered_at=shipment.delivered_at,
+            notes=shipment.notes,
+            created_at=shipment.created_at,
+            updated_at=shipment.updated_at,
+            shared_with_orders=shared_with
+        ))
+    
+    combined_with = None
+    if order.combined_group_id:
+        combined_orders = db.query(CombinedOrder).filter(
+            CombinedOrder.combined_group_id == order.combined_group_id
+        ).all()
+        combined_with = [co.order_id for co in combined_orders if co.order_id != order.id]
     
     return OrderAdminResponse(
         id=order.id,
@@ -1653,8 +1699,21 @@ def get_order(order_id: int, db: Session) -> OrderAdminResponse:
         created_at=order.created_at,
         paid_at=order.paid_at,
         stripe_payment_intent_id=order.stripe_payment_intent_id,
+        combined=order.combined or False,
+        combined_group_id=order.combined_group_id,
+        combined_with=combined_with,
+        shipments=shipments,
         items=items
     )
+
+
+def get_order(order_id: int, db: Session) -> OrderAdminResponse:
+    """Get a single order by ID"""
+    order = db.query(Order).filter(Order.id == order_id).first()
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+    
+    return _order_to_admin_response(order, db)
 
 
 def update_order_status(order_id: int, data: OrderStatusUpdate, db: Session) -> OrderAdminResponse:
@@ -1674,6 +1733,7 @@ def update_order_status(order_id: int, data: OrderStatusUpdate, db: Session) -> 
         )
     
     order.status = data.status
+    
     # If marking as paid, update payment_status and paid_at
     if data.status == "paid":
         order.payment_status = "completed"
@@ -1684,6 +1744,320 @@ def update_order_status(order_id: int, data: OrderStatusUpdate, db: Session) -> 
     db.refresh(order)
     
     return get_order(order_id, db)
+
+
+# ---------- Shipment Management ----------
+
+
+def create_order_shipment(order_id: int, data: OrderShipmentCreate, db: Session) -> OrderShipmentResponse:
+    """Create a new shipment/package for an order. If order is combined, creates for all orders in group."""
+    order = db.query(Order).filter(Order.id == order_id).first()
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+    
+    # Get all orders in the combined group if this order is combined
+    orders_to_update = [order]
+    if order.combined_group_id:
+        combined_orders = db.query(CombinedOrder).filter(
+            CombinedOrder.combined_group_id == order.combined_group_id
+        ).all()
+        order_ids_in_group = [co.order_id for co in combined_orders]
+        orders_to_update = db.query(Order).filter(Order.id.in_(order_ids_in_group)).all()
+    
+    # Create shipment for the primary order
+    shipment = OrderShipment(
+        order_id=order_id,
+        tracking_number=data.tracking_number,
+        tracking_url=data.tracking_url,
+        carrier=data.carrier,
+        shipped_at=data.shipped_at or datetime.utcnow(),
+        estimated_delivery=data.estimated_delivery,
+        notes=data.notes,
+        combined_group_id=order.combined_group_id  # Link to combined group if exists
+    )
+    db.add(shipment)
+    
+    # Create duplicate shipments for other orders in the group (if combined)
+    if order.combined_group_id and len(orders_to_update) > 1:
+        for other_order in orders_to_update:
+            if other_order.id != order_id:
+                other_shipment = OrderShipment(
+                    order_id=other_order.id,
+                    tracking_number=data.tracking_number,
+                    tracking_url=data.tracking_url,
+                    carrier=data.carrier,
+                    shipped_at=data.shipped_at or datetime.utcnow(),
+                    estimated_delivery=data.estimated_delivery,
+                    notes=data.notes,
+                    combined_group_id=order.combined_group_id
+                )
+                db.add(other_shipment)
+    
+    # Update status for all orders in the group
+    for o in orders_to_update:
+        if o.status not in ["shipped", "delivered"]:
+            o.status = "shipped"
+    
+    db.commit()
+    db.refresh(shipment)
+    
+    # Get shared_with_orders if combined
+    shared_with = None
+    if order.combined_group_id:
+        combined_orders = db.query(CombinedOrder).filter(
+            CombinedOrder.combined_group_id == order.combined_group_id
+        ).all()
+        shared_with = [co.order_id for co in combined_orders]
+    
+    return OrderShipmentResponse(
+        id=shipment.id,
+        order_id=shipment.order_id,
+        tracking_number=shipment.tracking_number,
+        tracking_url=shipment.tracking_url,
+        carrier=shipment.carrier,
+        shipped_at=shipment.shipped_at,
+        estimated_delivery=shipment.estimated_delivery,
+        delivered_at=shipment.delivered_at,
+        notes=shipment.notes,
+        created_at=shipment.created_at,
+        updated_at=shipment.updated_at,
+        shared_with_orders=shared_with
+    )
+
+
+def create_order_shipments_bulk(order_id: int, data: OrderShipmentBulkCreate, db: Session) -> List[OrderShipmentResponse]:
+    """Create multiple shipments/packages for an order in a single request"""
+    order = db.query(Order).filter(Order.id == order_id).first()
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+    
+    if not data.shipments:
+        raise HTTPException(status_code=400, detail="At least one shipment is required")
+    
+    created_shipments = []
+    
+    # Get all orders in the combined group if this order is combined
+    orders_to_update = [order]
+    if order.combined_group_id:
+        combined_orders = db.query(CombinedOrder).filter(
+            CombinedOrder.combined_group_id == order.combined_group_id
+        ).all()
+        order_ids_in_group = [co.order_id for co in combined_orders]
+        orders_to_update = db.query(Order).filter(Order.id.in_(order_ids_in_group)).all()
+    
+    for shipment_data in data.shipments:
+        # Create shipment for primary order
+        shipment = OrderShipment(
+            order_id=order_id,
+            tracking_number=shipment_data.tracking_number,
+            tracking_url=shipment_data.tracking_url,
+            carrier=shipment_data.carrier,
+            shipped_at=shipment_data.shipped_at or datetime.utcnow(),
+            estimated_delivery=shipment_data.estimated_delivery,
+            notes=shipment_data.notes,
+            combined_group_id=order.combined_group_id
+        )
+        db.add(shipment)
+        created_shipments.append(shipment)
+        
+        # Create duplicate shipments for other orders in the group (if combined)
+        if order.combined_group_id and len(orders_to_update) > 1:
+            for other_order in orders_to_update:
+                if other_order.id != order_id:
+                    other_shipment = OrderShipment(
+                        order_id=other_order.id,
+                        tracking_number=shipment_data.tracking_number,
+                        tracking_url=shipment_data.tracking_url,
+                        carrier=shipment_data.carrier,
+                        shipped_at=shipment_data.shipped_at or datetime.utcnow(),
+                        estimated_delivery=shipment_data.estimated_delivery,
+                        notes=shipment_data.notes,
+                        combined_group_id=order.combined_group_id
+                    )
+                    db.add(other_shipment)
+    
+    # Update status for all orders in the group
+    for o in orders_to_update:
+        if o.status not in ["shipped", "delivered"]:
+            o.status = "shipped"
+    
+    db.commit()
+    
+    # Refresh all shipments to get their IDs and timestamps
+    for shipment in created_shipments:
+        db.refresh(shipment)
+    
+    # Get shared_with_orders if combined
+    shared_with = None
+    if order.combined_group_id:
+        combined_orders = db.query(CombinedOrder).filter(
+            CombinedOrder.combined_group_id == order.combined_group_id
+        ).all()
+        shared_with = [co.order_id for co in combined_orders]
+    
+    return [
+        OrderShipmentResponse(
+            id=shipment.id,
+            order_id=shipment.order_id,
+            tracking_number=shipment.tracking_number,
+            tracking_url=shipment.tracking_url,
+            carrier=shipment.carrier,
+            shipped_at=shipment.shipped_at,
+            estimated_delivery=shipment.estimated_delivery,
+            delivered_at=shipment.delivered_at,
+            notes=shipment.notes,
+            created_at=shipment.created_at,
+            updated_at=shipment.updated_at,
+            shared_with_orders=shared_with
+        )
+        for shipment in created_shipments
+    ]
+
+
+def update_order_shipment(order_id: int, shipment_id: int, data: OrderShipmentUpdate, db: Session) -> OrderShipmentResponse:
+    """Update an existing shipment"""
+    shipment = db.query(OrderShipment).filter(
+        OrderShipment.id == shipment_id,
+        OrderShipment.order_id == order_id
+    ).first()
+    
+    if not shipment:
+        raise HTTPException(status_code=404, detail="Shipment not found")
+    
+    # Get the order to check if we need to update its status
+    order = db.query(Order).filter(Order.id == order_id).first()
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+    
+    # Track if delivered_at is being set (to check if all shipments are delivered)
+    was_delivered = shipment.delivered_at is not None
+    update_data = data.model_dump(exclude_unset=True)
+    
+    # If delivered_at is being set and it's None, set it to current time
+    if 'delivered_at' in update_data and update_data['delivered_at'] is None:
+        # Setting to None means marking as not delivered
+        update_data['delivered_at'] = None
+    elif 'delivered_at' in update_data and update_data['delivered_at'] is not None:
+        # delivered_at is being set to a specific datetime
+        pass
+    elif 'delivered_at' not in update_data and not was_delivered:
+        # If delivered_at is not in update but we're updating other fields, check if we should auto-set it
+        # This is optional - you might want to require explicit delivered_at
+        pass
+    
+    for key, value in update_data.items():
+        setattr(shipment, key, value)
+    
+    shipment.updated_at = datetime.utcnow()
+    
+    # If this is a combined shipment, update all shipments in the group
+    if shipment.combined_group_id:
+        # Update all shipments in the group with the same tracking number
+        group_shipments = db.query(OrderShipment).filter(
+            OrderShipment.combined_group_id == shipment.combined_group_id,
+            OrderShipment.tracking_number == shipment.tracking_number
+        ).all()
+        
+        for group_shipment in group_shipments:
+            if group_shipment.id != shipment.id:
+                for key, value in update_data.items():
+                    if key != 'delivered_at' or value is not None:  # Don't set delivered_at to None for others
+                        setattr(group_shipment, key, value)
+                group_shipment.updated_at = datetime.utcnow()
+        
+        # Get all orders in the combined group
+        combined_orders = db.query(CombinedOrder).filter(
+            CombinedOrder.combined_group_id == shipment.combined_group_id
+        ).all()
+        order_ids_in_group = [co.order_id for co in combined_orders]
+        orders_in_group = db.query(Order).filter(Order.id.in_(order_ids_in_group)).all()
+        
+        # Check if all shipments are delivered for each order in the group
+        if shipment.delivered_at is not None:
+            for o in orders_in_group:
+                all_shipments = db.query(OrderShipment).filter(OrderShipment.order_id == o.id).all()
+                all_delivered = all(s.delivered_at is not None for s in all_shipments) if all_shipments else False
+                
+                if all_delivered and o.status not in ["delivered", "canceled", "refunded"]:
+                    o.status = "delivered"
+    else:
+        # Check if all shipments are delivered and update order status (non-combined)
+        if shipment.delivered_at is not None:
+            # Get all shipments for this order
+            all_shipments = db.query(OrderShipment).filter(OrderShipment.order_id == order_id).all()
+            
+            # Check if all shipments are delivered
+            all_delivered = all(s.delivered_at is not None for s in all_shipments) if all_shipments else False
+            
+            if all_delivered and order.status not in ["delivered", "canceled", "refunded"]:
+                order.status = "delivered"
+    
+    db.commit()
+    db.refresh(shipment)
+    
+    # Get shared_with_orders if combined
+    shared_with = None
+    if shipment.combined_group_id:
+        combined_orders = db.query(CombinedOrder).filter(
+            CombinedOrder.combined_group_id == shipment.combined_group_id
+        ).all()
+        shared_with = [co.order_id for co in combined_orders]
+    
+    return OrderShipmentResponse(
+        id=shipment.id,
+        order_id=shipment.order_id,
+        tracking_number=shipment.tracking_number,
+        tracking_url=shipment.tracking_url,
+        carrier=shipment.carrier,
+        shipped_at=shipment.shipped_at,
+        estimated_delivery=shipment.estimated_delivery,
+        delivered_at=shipment.delivered_at,
+        notes=shipment.notes,
+        created_at=shipment.created_at,
+        updated_at=shipment.updated_at,
+        shared_with_orders=shared_with
+    )
+
+
+def get_order_shipments(order_id: int, db: Session) -> List[OrderShipmentResponse]:
+    """Get all shipments for an order"""
+    order = db.query(Order).filter(Order.id == order_id).first()
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+    
+    shipments = [
+        OrderShipmentResponse(
+            id=shipment.id,
+            order_id=shipment.order_id,
+            tracking_number=shipment.tracking_number,
+            tracking_url=shipment.tracking_url,
+            carrier=shipment.carrier,
+            shipped_at=shipment.shipped_at,
+            estimated_delivery=shipment.estimated_delivery,
+            notes=shipment.notes,
+            created_at=shipment.created_at,
+            updated_at=shipment.updated_at
+        )
+        for shipment in sorted(order.shipments, key=lambda s: s.created_at)
+    ]
+    
+    return shipments
+
+
+def delete_order_shipment(order_id: int, shipment_id: int, db: Session) -> dict:
+    """Delete a shipment from an order"""
+    shipment = db.query(OrderShipment).filter(
+        OrderShipment.id == shipment_id,
+        OrderShipment.order_id == order_id
+    ).first()
+    
+    if not shipment:
+        raise HTTPException(status_code=404, detail="Shipment not found")
+    
+    db.delete(shipment)
+    db.commit()
+    
+    return {"success": True, "message": "Shipment deleted successfully"}
 
 
 # ---------- Stats ----------
@@ -2867,5 +3241,242 @@ def update_inventory_unified(
         failed=len(errors),
         errors=errors,
         results=results
+    )
+
+
+# ---------- Order Combination ----------
+
+def _generate_combined_group_id() -> str:
+    """Generate a unique ID for a combined orders group"""
+    return f"cg_{secrets.token_urlsafe(12)}"
+
+
+def _validate_orders_for_combination(order_ids: List[int], db: Session) -> tuple[bool, List[Order], dict]:
+    """
+    Validate that orders can be combined.
+    Returns: (can_combine, orders_list, validation_details)
+    """
+    if len(order_ids) < 2:
+        raise HTTPException(status_code=400, detail="At least 2 orders are required to combine")
+    
+    # Get all orders
+    orders = db.query(Order).filter(Order.id.in_(order_ids)).all()
+    
+    if len(orders) != len(order_ids):
+        found_ids = [o.id for o in orders]
+        missing = [oid for oid in order_ids if oid not in found_ids]
+        raise HTTPException(status_code=404, detail=f"Orders not found: {missing}")
+    
+    validation_details = {}
+    can_combine = True
+    errors = []
+    
+    # Check 1: All orders must be paid
+    # We check status="paid" as the primary indicator. payment_status is secondary.
+    unpaid_orders = [o for o in orders if o.status != "paid"]
+    if unpaid_orders:
+        can_combine = False
+        errors.append(f"Unpaid orders: {[o.id for o in unpaid_orders]}")
+        for o in unpaid_orders:
+            validation_details[f"order_{o.id}"] = {
+                "status": o.status,
+                "payment_status": o.payment_status,
+                "can_combine": False,
+                "reason": "Order not paid (status must be 'paid')"
+            }
+    
+    # Check 2: All orders must have same shipping address
+    if orders:
+        first_address = orders[0].address
+        if first_address:
+            for o in orders:
+                if not o.address:
+                    can_combine = False
+                    errors.append(f"Order {o.id} has no address")
+                    validation_details[f"order_{o.id}"] = {
+                        "can_combine": False,
+                        "reason": "No shipping address"
+                    }
+                elif (o.address.get("city") != first_address.get("city") or
+                      o.address.get("state") != first_address.get("state") or
+                      o.address.get("zip") != first_address.get("zip") or
+                      o.address.get("country") != first_address.get("country")):
+                    can_combine = False
+                    errors.append(f"Order {o.id} has different address")
+                    validation_details[f"order_{o.id}"] = {
+                        "address": o.address,
+                        "can_combine": False,
+                        "reason": "Different shipping address"
+                    }
+    
+    # Check 3: No orders should have existing shipments
+    orders_with_shipments = [o for o in orders if o.shipments and len(o.shipments) > 0]
+    if orders_with_shipments:
+        can_combine = False
+        errors.append(f"Orders with existing shipments: {[o.id for o in orders_with_shipments]}")
+        for o in orders_with_shipments:
+            validation_details[f"order_{o.id}"] = {
+                "can_combine": False,
+                "reason": "Order already has shipments"
+            }
+    
+    # Check 4: No orders should already be combined
+    already_combined = [o for o in orders if o.combined or o.combined_group_id]
+    if already_combined:
+        can_combine = False
+        errors.append(f"Orders already combined: {[o.id for o in already_combined]}")
+        for o in already_combined:
+            validation_details[f"order_{o.id}"] = {
+                "can_combine": False,
+                "reason": "Order already in a combined group"
+            }
+    
+    if not can_combine:
+        error_message = "Cannot combine orders: validation failed"
+        if errors:
+            error_message += f" - {', '.join(errors)}"
+        raise HTTPException(
+            status_code=400,
+            detail=error_message
+        )
+    
+    return True, orders, {}
+
+
+def combine_orders(data: OrderCombineRequest, db: Session) -> OrderCombineResponse:
+    """Combine multiple orders into a single shipping group"""
+    # Validate orders (this will raise HTTPException if validation fails)
+    can_combine, orders, _ = _validate_orders_for_combination(data.order_ids, db)
+    
+    # Generate group ID
+    group_id = _generate_combined_group_id()
+    
+    # Update orders and create combined_orders records
+    order_responses = []
+    for order in orders:
+        order.combined = True
+        order.combined_group_id = group_id
+        
+        # Create CombinedOrder record
+        combined_order = CombinedOrder(
+            combined_group_id=group_id,
+            order_id=order.id
+        )
+        db.add(combined_order)
+    
+    db.commit()
+    
+    # Refresh orders and build responses
+    for order in orders:
+        db.refresh(order)
+        order_responses.append(_order_to_admin_response(order, db))
+    
+    return OrderCombineResponse(
+        success=True,
+        message="Orders combined successfully",
+        combined_group_id=group_id,
+        orders=order_responses
+    )
+
+
+def uncombine_orders(data: OrderUncombineRequest, db: Session) -> OrderUncombineResponse:
+    """Uncombine orders from a combined group"""
+    if len(data.order_ids) < 1:
+        raise HTTPException(status_code=400, detail="At least one order ID is required")
+    
+    # Get orders
+    orders = db.query(Order).filter(Order.id.in_(data.order_ids)).all()
+    
+    if len(orders) != len(data.order_ids):
+        found_ids = [o.id for o in orders]
+        missing = [oid for oid in data.order_ids if oid not in found_ids]
+        raise HTTPException(status_code=404, detail=f"Orders not found: {missing}")
+    
+    # Check that all orders are in the same group
+    group_ids = set(o.combined_group_id for o in orders if o.combined_group_id)
+    if len(group_ids) != 1:
+        raise HTTPException(
+            status_code=400,
+            detail="All orders must be in the same combined group"
+        )
+    
+    group_id = group_ids.pop()
+    
+    # Check if any shipments are already delivered
+    all_shipments = db.query(OrderShipment).filter(
+        OrderShipment.combined_group_id == group_id
+    ).all()
+    
+    delivered_shipments = [s for s in all_shipments if s.delivered_at is not None]
+    if delivered_shipments:
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot uncombine orders with delivered shipments"
+        )
+    
+    # Remove combined_orders records
+    db.query(CombinedOrder).filter(
+        CombinedOrder.combined_group_id == group_id,
+        CombinedOrder.order_id.in_(data.order_ids)
+    ).delete(synchronize_session=False)
+    
+    # Update orders
+    for order in orders:
+        order.combined = False
+        order.combined_group_id = None
+    
+    # If there are shipments, we need to handle them
+    # For now, we'll keep them but remove the combined_group_id
+    for shipment in all_shipments:
+        shipment.combined_group_id = None
+    
+    db.commit()
+    
+    return OrderUncombineResponse(
+        success=True,
+        message="Orders uncombined successfully",
+        uncombined_orders=data.order_ids
+    )
+
+
+def get_combined_orders(combined_group_id: str, db: Session) -> CombinedOrdersResponse:
+    """Get all orders in a combined group"""
+    # Get all orders in the group
+    orders = db.query(Order).filter(
+        Order.combined_group_id == combined_group_id
+    ).all()
+    
+    if not orders:
+        raise HTTPException(status_code=404, detail="Combined group not found")
+    
+    # Get shared shipments
+    shipments = db.query(OrderShipment).filter(
+        OrderShipment.combined_group_id == combined_group_id
+    ).all()
+    
+    # Build responses
+    order_responses = [_order_to_admin_response(o, db) for o in orders]
+    shipment_responses = [
+        OrderShipmentResponse(
+            id=s.id,
+            order_id=s.order_id,
+            tracking_number=s.tracking_number,
+            tracking_url=s.tracking_url,
+            carrier=s.carrier,
+            shipped_at=s.shipped_at,
+            estimated_delivery=s.estimated_delivery,
+            delivered_at=s.delivered_at,
+            notes=s.notes,
+            created_at=s.created_at,
+            updated_at=s.updated_at,
+            shared_with_orders=[o.id for o in orders]
+        )
+        for s in shipments
+    ]
+    
+    return CombinedOrdersResponse(
+        combined_group_id=combined_group_id,
+        orders=order_responses,
+        shared_shipments=shipment_responses
     )
 

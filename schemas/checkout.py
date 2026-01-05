@@ -84,6 +84,20 @@ class PaymentDetailsResponse(BaseModel):
     total: Optional[float] = None
     requires_payment_intent: Optional[bool] = None
 
+class ShipmentInfo(BaseModel):
+    """Basic shipment information for order list"""
+    id: int
+    tracking_number: str
+    tracking_url: Optional[str] = None
+    carrier: Optional[str] = None
+    shipped_at: Optional[datetime] = None
+    delivered_at: Optional[datetime] = None
+    status: Optional[str] = None  # pending, in_transit, delivered, exception (derived from delivered_at)
+
+    class Config:
+        from_attributes = True
+
+
 class OrderSummary(BaseModel):
     id: int
     status: str
@@ -91,6 +105,9 @@ class OrderSummary(BaseModel):
     shipping_method: str
     total: float
     created_at: datetime
+    combined: bool = False  # True if order is combined with others
+    combined_with: Optional[List[int]] = None  # List of order IDs in the same group
+    shipments: List[ShipmentInfo] = []  # List of shipments for this order
 
     class Config:
         from_attributes = True
@@ -117,6 +134,22 @@ class OrderItemDetail(BaseModel):
     image_url: Optional[str] = None  # Variant image if available, otherwise product image
 
 
+class ShipmentDetail(BaseModel):
+    """Detailed shipment information for order detail"""
+    id: int
+    tracking_number: str
+    tracking_url: Optional[str] = None
+    carrier: Optional[str] = None
+    shipped_at: Optional[datetime] = None
+    estimated_delivery: Optional[datetime] = None
+    delivered_at: Optional[datetime] = None
+    notes: Optional[str] = None
+    shared_with_orders: Optional[List[int]] = None  # List of order IDs sharing this shipment
+
+    class Config:
+        from_attributes = True
+
+
 class OrderDetailResponse(BaseModel):
     order_id: str
     status: str
@@ -128,6 +161,12 @@ class OrderDetailResponse(BaseModel):
     address: Optional[AddressDetail] = None
     shipping_method: str
     payment_method: str
+    combined: bool = False  # True if order is combined with others
+    combined_with: Optional[List[int]] = None  # List of order IDs in the same group
+    tracking_number: Optional[str] = None  # DEPRECATED: Use shipments array instead
+    tracking_url: Optional[str] = None  # DEPRECATED: Use shipments array instead
+    shipped_at: Optional[datetime] = None  # DEPRECATED: Use shipments array instead
+    shipments: List[ShipmentDetail] = []  # List of all shipments/packages for this order
     created_at: datetime
 
 

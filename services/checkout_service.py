@@ -1,7 +1,7 @@
 import logging
 from sqlalchemy.orm import Session
 from fastapi import HTTPException
-from models import Product, ProductVariant, Order, OrderItem, Cart, CartItem, User
+from models import Product, ProductVariant, Order, OrderItem, Cart, CartItem, User, CombinedOrder
 from schemas.checkout import (
     CheckoutOptionsRequest, OrderCreate, 
     ConfirmManualPayment, CartValidationIssue, CheckoutValidationResponse
@@ -573,10 +573,51 @@ def get_payment_details(order_id: str, db: Session):
     raise HTTPException(status_code=400, detail="No instructions available for this method")
 
 def get_order_list(db: Session, user_id: Optional[int] = None):
+    """Get list of orders for a user, including shipment information"""
+    from schemas.checkout import OrderSummary, ShipmentInfo
+    
     query = db.query(Order)
     if user_id:
         query = query.filter(Order.user_id == user_id)
-    return query.order_by(Order.created_at.desc()).all()
+    orders = query.order_by(Order.created_at.desc()).all()
+    
+    # Convert to OrderSummary with shipments
+    result = []
+    for order in orders:
+        shipments = [
+            ShipmentInfo(
+                id=shipment.id,
+                tracking_number=shipment.tracking_number,
+                tracking_url=shipment.tracking_url,
+                carrier=shipment.carrier,
+                shipped_at=shipment.shipped_at,
+                delivered_at=shipment.delivered_at,
+                status="delivered" if shipment.delivered_at else "in_transit" if shipment.shipped_at else "pending"
+            )
+            for shipment in sorted(order.shipments, key=lambda s: s.created_at)
+        ]
+        
+        # Get combined orders info
+        combined_with = None
+        if order.combined_group_id:
+            combined_orders = db.query(CombinedOrder).filter(
+                CombinedOrder.combined_group_id == order.combined_group_id
+            ).all()
+            combined_with = [co.order_id for co in combined_orders if co.order_id != order.id]
+        
+        result.append(OrderSummary(
+            id=order.id,
+            status=order.status,
+            payment_method=order.payment_method,
+            shipping_method=order.shipping_method,
+            total=order.total,
+            created_at=order.created_at,
+            combined=order.combined or False,
+            combined_with=combined_with,
+            shipments=shipments
+        ))
+    
+    return result
 
 
 def get_order_detail(order_id: str, user_id: str, db: Session):
@@ -659,6 +700,37 @@ def get_order_detail(order_id: str, user_id: str, db: Session):
         "apartment": address_data.get("apartment")
     } if address_data else None
     
+    # Get shipments for this order
+    from schemas.checkout import ShipmentDetail
+    shipments = []
+    for shipment in sorted(order.shipments, key=lambda s: s.created_at):
+        shared_with = None
+        if shipment.combined_group_id:
+            combined_orders_for_shipment = db.query(CombinedOrder).filter(
+                CombinedOrder.combined_group_id == shipment.combined_group_id
+            ).all()
+            shared_with = [co.order_id for co in combined_orders_for_shipment]
+        
+        shipments.append(ShipmentDetail(
+            id=shipment.id,
+            tracking_number=shipment.tracking_number,
+            tracking_url=shipment.tracking_url,
+            carrier=shipment.carrier,
+            shipped_at=shipment.shipped_at,
+            estimated_delivery=shipment.estimated_delivery,
+            delivered_at=shipment.delivered_at,
+            notes=shipment.notes,
+            shared_with_orders=shared_with
+        ))
+    
+    # Get combined orders info
+    combined_with = None
+    if order.combined_group_id:
+        combined_orders = db.query(CombinedOrder).filter(
+            CombinedOrder.combined_group_id == order.combined_group_id
+        ).all()
+        combined_with = [co.order_id for co in combined_orders if co.order_id != order.id]
+    
     return {
         "order_id": str(order.id),
         "status": order.status,
@@ -667,9 +739,15 @@ def get_order_detail(order_id: str, user_id: str, db: Session):
         "shipping_cost": shipping_cost,
         "tax": tax,
         "items": items_detail,
+        "combined": order.combined or False,
+        "combined_with": combined_with,
         "address": address,
         "shipping_method": order.shipping_method,
         "payment_method": order.payment_method,
+        "tracking_number": getattr(order, 'tracking_number', None),  # Deprecated, kept for backwards compatibility
+        "tracking_url": getattr(order, 'tracking_url', None),  # Deprecated, kept for backwards compatibility
+        "shipped_at": getattr(order, 'shipped_at', None),  # Deprecated, kept for backwards compatibility
+        "shipments": [s.model_dump() for s in shipments],  # New: list of all shipments
         "created_at": order.created_at
     }
 

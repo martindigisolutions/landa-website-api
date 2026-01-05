@@ -486,6 +486,48 @@ class RecipientAddress(BaseModel):
     address_detail: Optional[str] = None
 
 
+class OrderShipmentResponse(BaseModel):
+    id: int
+    order_id: int
+    tracking_number: str
+    tracking_url: Optional[str] = None
+    carrier: Optional[str] = None
+    shipped_at: Optional[datetime] = None
+    estimated_delivery: Optional[datetime] = None
+    delivered_at: Optional[datetime] = None
+    notes: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+    shared_with_orders: Optional[List[int]] = None  # List of order IDs sharing this shipment
+
+    class Config:
+        from_attributes = True
+
+
+class OrderShipmentCreate(BaseModel):
+    tracking_number: str
+    tracking_url: Optional[str] = None
+    carrier: Optional[str] = None
+    shipped_at: Optional[datetime] = None
+    estimated_delivery: Optional[datetime] = None
+    notes: Optional[str] = None
+
+
+class OrderShipmentBulkCreate(BaseModel):
+    """Create multiple shipments for an order in a single request"""
+    shipments: List[OrderShipmentCreate]  # List of shipments to create
+
+
+class OrderShipmentUpdate(BaseModel):
+    tracking_number: Optional[str] = None
+    tracking_url: Optional[str] = None
+    carrier: Optional[str] = None
+    shipped_at: Optional[datetime] = None
+    estimated_delivery: Optional[datetime] = None
+    delivered_at: Optional[datetime] = None
+    notes: Optional[str] = None
+
+
 class OrderAdminResponse(BaseModel):
     id: int
     session_id: Optional[str]
@@ -502,6 +544,10 @@ class OrderAdminResponse(BaseModel):
     created_at: datetime
     paid_at: Optional[datetime]
     stripe_payment_intent_id: Optional[str]
+    combined: bool = False  # True if order is combined with others
+    combined_group_id: Optional[str] = None  # ID of the combined group
+    combined_with: Optional[List[int]] = None  # List of order IDs in the same group
+    shipments: List[OrderShipmentResponse] = []  # List of shipments/packages for this order
     items: List[OrderItemResponse] = []
 
     class Config:
@@ -897,3 +943,38 @@ class InventoryUnifiedUpdateResponse(BaseModel):
     failed: int
     errors: List[InventoryUnifiedUpdateError] = []
     results: List[InventoryUnifiedUpdateResult] = []
+
+
+# ---------- Order Combination Schemas ----------
+
+class OrderCombineRequest(BaseModel):
+    """Request to combine multiple orders"""
+    order_ids: List[int]
+    notes: Optional[str] = None
+
+
+class OrderCombineResponse(BaseModel):
+    """Response when orders are combined"""
+    success: bool
+    message: str
+    combined_group_id: str
+    orders: List[OrderAdminResponse]
+
+
+class OrderUncombineRequest(BaseModel):
+    """Request to uncombine orders"""
+    order_ids: List[int]
+
+
+class OrderUncombineResponse(BaseModel):
+    """Response when orders are uncombined"""
+    success: bool
+    message: str
+    uncombined_orders: List[int]
+
+
+class CombinedOrdersResponse(BaseModel):
+    """Response for getting combined orders group"""
+    combined_group_id: str
+    orders: List[OrderAdminResponse]
+    shared_shipments: List[OrderShipmentResponse]

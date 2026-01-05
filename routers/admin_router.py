@@ -15,6 +15,9 @@ from schemas.admin import (
     ProductVariantGroupCreate, ProductVariantGroupResponse,
     VariantBulkDelete, VariantBulkDeleteResponse,
     OrderAdminResponse, OrderStatusUpdate, PaginatedOrdersResponse,
+    OrderShipmentResponse, OrderShipmentCreate, OrderShipmentUpdate, OrderShipmentBulkCreate,
+    OrderCombineRequest, OrderCombineResponse, OrderUncombineRequest, OrderUncombineResponse,
+    CombinedOrdersResponse,
     AdminStats,
     UserAdminCreate, UserAdminResponse, UserAdminCreatedResponse, PaginatedUsersResponse,
     SingleAccessTokenCreate, SingleAccessTokenResponse,
@@ -364,6 +367,53 @@ def list_orders(
     return admin_service.list_orders(db, status, payment_status, user_id, page, page_size)
 
 
+# IMPORTANT: Specific routes must come BEFORE the generic /orders/{order_id} route
+# ==================== ORDER COMBINATION ====================
+# These endpoints require orders:write scope
+
+@router.post(
+    "/orders/combine",
+    response_model=OrderCombineResponse,
+    summary="Combine orders",
+    description="Combine multiple orders into a single shipping group. All orders must be paid and have the same shipping address."
+)
+def combine_orders(
+    data: OrderCombineRequest,
+    app=Depends(admin_service.require_scope("orders:write")),
+    db: Session = Depends(get_db)
+):
+    return admin_service.combine_orders(data, db)
+
+
+@router.post(
+    "/orders/uncombine",
+    response_model=OrderUncombineResponse,
+    summary="Uncombine orders",
+    description="Separate orders from a combined group. Cannot uncombine if shipments are already delivered."
+)
+def uncombine_orders(
+    data: OrderUncombineRequest,
+    app=Depends(admin_service.require_scope("orders:write")),
+    db: Session = Depends(get_db)
+):
+    return admin_service.uncombine_orders(data, db)
+
+
+@router.get(
+    "/orders/combined/{combined_group_id}",
+    response_model=CombinedOrdersResponse,
+    summary="Get combined orders group",
+    description="Get all orders in a combined group and their shared shipments."
+)
+def get_combined_orders(
+    combined_group_id: str,
+    app=Depends(admin_service.require_scope("orders:read")),
+    db: Session = Depends(get_db)
+):
+    return admin_service.get_combined_orders(combined_group_id, db)
+
+
+# Now the generic route comes after specific routes
 @router.get(
     "/orders/{order_id}",
     response_model=OrderAdminResponse,
@@ -391,6 +441,80 @@ def update_order_status(
     db: Session = Depends(get_db)
 ):
     return admin_service.update_order_status(order_id, data, db)
+
+
+@router.post(
+    "/orders/{order_id}/shipments",
+    response_model=OrderShipmentResponse,
+    summary="Create single shipment for order",
+    description="Create a new shipment/package for an order with tracking information. An order can have multiple shipments."
+)
+def create_order_shipment(
+    order_id: int,
+    data: OrderShipmentCreate,
+    app=Depends(admin_service.require_scope("orders:write")),
+    db: Session = Depends(get_db)
+):
+    return admin_service.create_order_shipment(order_id, data, db)
+
+
+@router.post(
+    "/orders/{order_id}/shipments/bulk",
+    response_model=List[OrderShipmentResponse],
+    summary="Create multiple shipments for order",
+    description="Create multiple shipments/packages for an order in a single request. Useful when an order is divided into multiple packages."
+)
+def create_order_shipments_bulk(
+    order_id: int,
+    data: OrderShipmentBulkCreate,
+    app=Depends(admin_service.require_scope("orders:write")),
+    db: Session = Depends(get_db)
+):
+    return admin_service.create_order_shipments_bulk(order_id, data, db)
+
+
+@router.get(
+    "/orders/{order_id}/shipments",
+    response_model=List[OrderShipmentResponse],
+    summary="Get all shipments for order",
+    description="Get all shipments/packages associated with an order."
+)
+def get_order_shipments(
+    order_id: int,
+    app=Depends(admin_service.require_scope("orders:read")),
+    db: Session = Depends(get_db)
+):
+    return admin_service.get_order_shipments(order_id, db)
+
+
+@router.patch(
+    "/orders/{order_id}/shipments/{shipment_id}",
+    response_model=OrderShipmentResponse,
+    summary="Update shipment",
+    description="Update tracking information for a shipment."
+)
+def update_order_shipment(
+    order_id: int,
+    shipment_id: int,
+    data: OrderShipmentUpdate,
+    app=Depends(admin_service.require_scope("orders:write")),
+    db: Session = Depends(get_db)
+):
+    return admin_service.update_order_shipment(order_id, shipment_id, data, db)
+
+
+@router.delete(
+    "/orders/{order_id}/shipments/{shipment_id}",
+    summary="Delete shipment",
+    description="Delete a shipment from an order."
+)
+def delete_order_shipment(
+    order_id: int,
+    shipment_id: int,
+    app=Depends(admin_service.require_scope("orders:write")),
+    db: Session = Depends(get_db)
+):
+    return admin_service.delete_order_shipment(order_id, shipment_id, db)
 
 
 # ==================== STATISTICS ====================
