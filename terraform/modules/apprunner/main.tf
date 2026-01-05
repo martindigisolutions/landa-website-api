@@ -89,6 +89,35 @@ resource "aws_iam_role" "apprunner_instance" {
   tags = var.tags
 }
 
+# IAM Policy para acceso a Secrets Manager y SSM
+resource "aws_iam_role_policy" "apprunner_secrets" {
+  name = "${var.project_name}-apprunner-secrets-policy"
+  role = aws_iam_role.apprunner_instance.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "secretsmanager:GetSecretValue",
+          "secretsmanager:DescribeSecret"
+        ]
+        Resource = var.secrets_manager_arns
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "ssm:GetParameter",
+          "ssm:GetParameters",
+          "ssm:GetParametersByPath"
+        ]
+        Resource = var.ssm_parameter_arns
+      }
+    ]
+  })
+}
+
 # ============================================
 # App Runner Service (desde ECR)
 # ============================================
@@ -104,6 +133,7 @@ resource "aws_apprunner_service" "api" {
       image_configuration {
         port = "8080"
 
+        # Environment variables (non-sensitive)
         runtime_environment_variables = merge(
           {
             PORT            = "8080"
@@ -114,6 +144,9 @@ resource "aws_apprunner_service" "api" {
           },
           var.extra_env_vars
         )
+
+        # Secrets from Secrets Manager (sensitive)
+        runtime_environment_secrets = var.runtime_environment_secrets
       }
 
       image_identifier      = "${aws_ecr_repository.api.repository_url}:latest"
@@ -131,6 +164,17 @@ resource "aws_apprunner_service" "api" {
 
   auto_scaling_configuration_arn = aws_apprunner_auto_scaling_configuration_version.api.arn
 
+  # VPC Connector (optional, for private RDS access)
+  dynamic "network_configuration" {
+    for_each = var.vpc_connector_arn != null ? [1] : []
+    content {
+      egress_configuration {
+        egress_type       = "VPC"
+        vpc_connector_arn = var.vpc_connector_arn
+      }
+    }
+  }
+
   health_check_configuration {
     protocol            = "HTTP"
     path                = "/api/health"
@@ -142,7 +186,10 @@ resource "aws_apprunner_service" "api" {
 
   tags = var.tags
 
-  depends_on = [aws_iam_role_policy_attachment.apprunner_ecr_policy]
+  depends_on = [
+    aws_iam_role_policy_attachment.apprunner_ecr_policy,
+    aws_iam_role_policy.apprunner_secrets
+  ]
 }
 
 # ============================================

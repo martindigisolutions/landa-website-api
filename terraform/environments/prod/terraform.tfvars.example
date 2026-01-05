@@ -16,8 +16,20 @@ db_username = "landa_admin"
 db_password = "YourVerySecureProductionPassword123!"  # Use a VERY strong password!
 
 # Production RDS settings
-rds_instance_class = "db.t3.small"   # Options: db.t3.micro, db.t3.small, db.t3.medium
+rds_instance_class = "db.t3.micro"   # Options: db.t3.micro, db.t3.small, db.t3.medium
 rds_multi_az       = false           # Set to true for high availability (~2x cost)
+
+# ============================================
+# Infrastructure Configuration
+# ============================================
+# Use AWS Secrets Manager for sensitive variables (RECOMMENDED)
+use_secrets_manager = true
+
+# Use VPC Connector for App Runner to access private RDS (REQUIRED if RDS is private)
+use_vpc_connector = true
+
+# Email for CloudWatch alarms
+alert_email = "devops@landabeautysupply.com"
 
 # ============================================
 # Optional Overrides
@@ -25,8 +37,8 @@ rds_multi_az       = false           # Set to true for high availability (~2x co
 # aws_region    = "us-west-2"
 # aws_profile   = "default"
 # project_name  = "landa-beauty-api"
-# cpu           = "1024"
-# memory        = "2048"
+# cpu           = "512"      # Optimized: start with 0.5 vCPU
+# memory        = "1024"      # Optimized: start with 1GB
 # min_instances = 1
-# max_instances = 10
+# max_instances = 5           # Optimized: reduced from 10
 

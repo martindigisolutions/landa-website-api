@@ -31,6 +31,12 @@ variable "allowed_cidr_blocks" {
   default     = ["10.0.0.0/8"]
 }
 
+variable "allowed_security_group_ids" {
+  description = "Security group IDs allowed to connect to RDS (for App Runner VPC Connector)"
+  type        = list(string)
+  default     = []
+}
+
 variable "publicly_accessible" {
   description = "Whether the RDS instance is publicly accessible"
   type        = bool
@@ -108,6 +114,12 @@ variable "deletion_protection" {
 
 variable "skip_final_snapshot" {
   description = "Skip final snapshot when deleting"
+  type        = bool
+  default     = true
+}
+
+variable "auto_minor_version_upgrade" {
+  description = "Enable automatic minor version upgrades"
   type        = bool
   default     = true
 }

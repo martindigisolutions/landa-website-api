@@ -61,9 +61,33 @@ variable "allowed_origins" {
 }
 
 variable "extra_env_vars" {
-  description = "Additional environment variables to pass to the container"
+  description = "Additional environment variables to pass to the container (non-sensitive)"
   type        = map(string)
   default     = {}
+}
+
+variable "runtime_environment_secrets" {
+  description = "Secrets from AWS Secrets Manager (map of env var name to secret ARN)"
+  type        = map(string)
+  default     = {}
+}
+
+variable "secrets_manager_arns" {
+  description = "List of Secrets Manager ARNs that App Runner can access"
+  type        = list(string)
+  default     = []
+}
+
+variable "ssm_parameter_arns" {
+  description = "List of SSM Parameter ARNs that App Runner can access"
+  type        = list(string)
+  default     = []
+}
+
+variable "vpc_connector_arn" {
+  description = "ARN of VPC Connector for private RDS access (optional)"
+  type        = string
+  default     = null
 }
 
 # ============================================

@@ -10,12 +10,28 @@ resource "aws_security_group" "rds" {
   description = "Security group for RDS PostgreSQL"
   vpc_id      = var.vpc_id
 
-  ingress {
-    description = "PostgreSQL from VPC"
-    from_port   = 5432
-    to_port     = 5432
-    protocol    = "tcp"
-    cidr_blocks = var.allowed_cidr_blocks
+  # Allow from CIDR blocks
+  dynamic "ingress" {
+    for_each = length(var.allowed_cidr_blocks) > 0 ? [1] : []
+    content {
+      description = "PostgreSQL from VPC CIDR"
+      from_port   = 5432
+      to_port     = 5432
+      protocol    = "tcp"
+      cidr_blocks = var.allowed_cidr_blocks
+    }
+  }
+
+  # Allow from security groups (for App Runner VPC Connector)
+  dynamic "ingress" {
+    for_each = var.allowed_security_group_ids
+    content {
+      description     = "PostgreSQL from security group"
+      from_port       = 5432
+      to_port         = 5432
+      protocol        = "tcp"
+      security_groups = [ingress.value]
+    }
   }
 
   egress {
@@ -27,6 +43,23 @@ resource "aws_security_group" "rds" {
 
   tags = merge(var.tags, {
     Name = "${var.project_name}-rds-sg"
+  })
+}
+
+# ============================================
+# DB Parameter Group (for SSL enforcement)
+# ============================================
+resource "aws_db_parameter_group" "main" {
+  name   = "${var.project_name}-pg"
+  family = "postgres16"
+
+  parameter {
+    name  = "rds.force_ssl"
+    value = "1"  # Force SSL connections
+  }
+
+  tags = merge(var.tags, {
+    Name = "${var.project_name}-pg"
   })
 }
 
@@ -70,16 +103,21 @@ resource "aws_db_instance" "main" {
   vpc_security_group_ids = [aws_security_group.rds.id]
   publicly_accessible    = var.publicly_accessible
 
+  # Parameter Group (for SSL enforcement)
+  parameter_group_name = aws_db_parameter_group.main.name
+
   # Backup
   backup_retention_period = var.backup_retention_period
   backup_window          = "03:00-04:00"
   maintenance_window     = "Mon:04:00-Mon:05:00"
+  copy_tags_to_snapshot  = true  # Copy tags to snapshots for better tracking
 
   # Options
-  multi_az                = var.multi_az
-  deletion_protection     = var.deletion_protection
-  skip_final_snapshot     = var.skip_final_snapshot
+  multi_az                  = var.multi_az
+  deletion_protection       = var.deletion_protection
+  skip_final_snapshot      = var.skip_final_snapshot
   final_snapshot_identifier = var.skip_final_snapshot ? null : "${var.project_name}-final-snapshot"
+  auto_minor_version_upgrade = var.auto_minor_version_upgrade
 
   # Performance Insights (free for db.t3.micro)
   performance_insights_enabled = var.instance_class != "db.t3.micro"
