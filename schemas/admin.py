@@ -455,6 +455,7 @@ class OrderItemResponse(BaseModel):
     variant_id: Optional[int] = None
     product_name: str
     variant_name: Optional[str] = None
+    seller_sku: Optional[str] = None  # SKU of variant if exists, otherwise product SKU
     quantity: int
     price: float
     image_url: Optional[str] = None  # Variant image if available, otherwise product image
@@ -463,13 +464,35 @@ class OrderItemResponse(BaseModel):
         from_attributes = True
 
 
+class RecipientAddressDistrictInfo(BaseModel):
+    address_name: str
+    address_level: str  # L0 (Country), L1 (State), L2 (County), L3 (City)
+    address_level_name: str  # Country, State, County, City
+
+
+class RecipientAddress(BaseModel):
+    name: Optional[str] = None  # Full name
+    last_name: Optional[str] = None
+    first_name: Optional[str] = None
+    postal_code: Optional[str] = None
+    region_code: Optional[str] = None  # Country code (US, MX, etc)
+    full_address: Optional[str] = None
+    phone_number: Optional[str] = None
+    address_line1: str = ""  # Always string, never None (empty string if not available)
+    address_line2: str = ""  # Always string, never None (empty string if not available)
+    address_line3: str = ""  # Always string, never None (empty string if not available)
+    address_line4: str = ""  # Always string, never None (empty string if not available)
+    district_info: List[RecipientAddressDistrictInfo] = []
+    address_detail: Optional[str] = None
+
+
 class OrderAdminResponse(BaseModel):
     id: int
     session_id: Optional[str]
     user_id: Optional[int]
     shipping_method: Optional[str]
     payment_method: Optional[str]
-    address: Optional[dict]
+    address: Optional[RecipientAddress] = None  # Formato TikTok
     status: str
     payment_status: str
     total: float

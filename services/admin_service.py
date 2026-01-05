@@ -27,6 +27,7 @@ from schemas.admin import (
     ProductBulkUpdate, ProductBulkUpdateItem, ProductBulkUpdateResponse, ProductBulkUpdateError,
     VariantBulkDelete, VariantBulkDeleteResponse, VariantBulkDeleteError,
     OrderAdminResponse, OrderItemResponse, OrderStatusUpdate, PaginatedOrdersResponse,
+    RecipientAddress, RecipientAddressDistrictInfo,
     AdminStats,
     UserAdminCreate, UserAdminResponse, UserAdminCreatedResponse, PaginatedUsersResponse,
     SingleAccessTokenCreate, SingleAccessTokenResponse,
@@ -1406,6 +1407,101 @@ def bulk_delete_variants(data: VariantBulkDelete, db: Session) -> VariantBulkDel
 
 # ---------- Order Management ----------
 
+def _transform_address_to_tiktok_format(address_dict: Optional[dict], user: Optional[User] = None) -> Optional[RecipientAddress]:
+    """Transform address dict to TikTok-style format"""
+    if not address_dict:
+        return None
+    
+    # Get user info if available
+    first_name = None
+    last_name = None
+    full_name = None
+    phone_number = None
+    
+    if user:
+        first_name = user.first_name
+        last_name = user.last_name
+        if first_name and last_name:
+            full_name = f"{first_name} {last_name}"
+        elif first_name:
+            full_name = first_name
+        elif last_name:
+            full_name = last_name
+        phone_number = user.phone or user.whatsapp_phone
+    
+    # Extract address components
+    street = address_dict.get("street") or ""
+    apartment = address_dict.get("apartment") or ""
+    city = address_dict.get("city") or ""
+    state = address_dict.get("state") or ""
+    zip_code = address_dict.get("zip") or ""
+    country = address_dict.get("country") or "US"
+    
+    # Build address lines
+    address_line1 = street
+    address_line2 = apartment
+    address_line3 = ""
+    address_line4 = ""
+    
+    # Build full address
+    address_parts = []
+    if country:
+        address_parts.append(country)
+    if state:
+        address_parts.append(state)
+    if city:
+        address_parts.append(city)
+    if street:
+        address_parts.append(street)
+    full_address = ",".join(address_parts) if address_parts else None
+    
+    # Build district_info
+    district_info = []
+    if country:
+        district_info.append(RecipientAddressDistrictInfo(
+            address_name=country,
+            address_level="L0",
+            address_level_name="Country"
+        ))
+    if state:
+        district_info.append(RecipientAddressDistrictInfo(
+            address_name=state,
+            address_level="L1",
+            address_level_name="State"
+        ))
+    if city:
+        district_info.append(RecipientAddressDistrictInfo(
+            address_name=city,
+            address_level="L3",
+            address_level_name="City"
+        ))
+    
+    # Map country to region code (simple mapping)
+    region_code_map = {
+        "US": "US",
+        "United States": "US",
+        "MX": "MX",
+        "Mexico": "MX",
+    }
+    region_code = region_code_map.get(country, country[:2].upper() if country else "US")
+    
+    return RecipientAddress(
+        name=full_name,
+        last_name=last_name,
+        first_name=first_name,
+        postal_code=zip_code if zip_code else None,
+        region_code=region_code,
+        full_address=full_address,
+        phone_number=phone_number,
+        address_line1=address_line1 or "",  # Always return string, never None
+        address_line2=address_line2 or "",  # Always return string, never None
+        address_line3=address_line3 or "",  # Always return string, never None
+        address_line4=address_line4 or "",  # Always return string, never None
+        district_info=district_info,
+        address_detail=street if street else None
+    )
+
+
 def list_orders(
     db: Session,
     status: Optional[str] = None,
@@ -1433,14 +1529,41 @@ def list_orders(
     for order in orders:
         items = []
         for item in order.items:
-            product_name = item.product.name if item.product else "Unknown"
+            product = item.product
+            variant = item.variant
+            
+            product_name = product.name if product else "Unknown"
+            variant_name = item.variant_name or (variant.name if variant else None)
+            
+            # Use variant SKU if exists, otherwise product SKU
+            seller_sku = None
+            if variant and variant.seller_sku:
+                seller_sku = variant.seller_sku
+            elif product and product.seller_sku:
+                seller_sku = product.seller_sku
+            
+            # Use variant image if available, otherwise product image
+            image_url = None
+            if variant and variant.image_url:
+                image_url = variant.image_url
+            elif product:
+                image_url = product.image_url
+            
             items.append(OrderItemResponse(
                 id=item.id,
                 product_id=item.product_id,
+                variant_id=item.variant_id,
                 product_name=product_name,
+                variant_name=variant_name,
+                seller_sku=seller_sku,
                 quantity=item.quantity,
-                price=item.price
+                price=item.price,
+                image_url=image_url
             ))
+        
+        # Transform address to TikTok format
+        user = db.query(User).filter(User.id == order.user_id).first() if order.user_id else None
+        recipient_address = _transform_address_to_tiktok_format(order.address, user)
         
         results.append(OrderAdminResponse(
             id=order.id,
@@ -1448,7 +1571,7 @@ def list_orders(
             user_id=order.user_id,
             shipping_method=order.shipping_method,
             payment_method=order.payment_method,
-            address=order.address,
+            address=recipient_address,
             status=order.status,
             payment_status=order.payment_status,
             total=order.total,
@@ -1481,6 +1604,13 @@ def get_order(order_id: int, db: Session) -> OrderAdminResponse:
         product_name = product.name if product else "Unknown"
         variant_name = item.variant_name or (variant.name if variant else None)
         
+        # Use variant SKU if exists, otherwise product SKU
+        seller_sku = None
+        if variant and variant.seller_sku:
+            seller_sku = variant.seller_sku
+        elif product and product.seller_sku:
+            seller_sku = product.seller_sku
+        
         # Use variant image if available, otherwise product image
         image_url = None
         if variant and variant.image_url:
@@ -1494,10 +1624,15 @@ def get_order(order_id: int, db: Session) -> OrderAdminResponse:
             variant_id=item.variant_id,
             product_name=product_name,
             variant_name=variant_name,
+            seller_sku=seller_sku,
             quantity=item.quantity,
             price=item.price,
             image_url=image_url
         ))
+    
+    # Transform address to TikTok format
+    user = db.query(User).filter(User.id == order.user_id).first() if order.user_id else None
+    recipient_address = _transform_address_to_tiktok_format(order.address, user)
     
     return OrderAdminResponse(
         id=order.id,
@@ -1505,7 +1640,7 @@ def get_order(order_id: int, db: Session) -> OrderAdminResponse:
         user_id=order.user_id,
         shipping_method=order.shipping_method,
         payment_method=order.payment_method,
-        address=order.address,
+        address=recipient_address,
         status=order.status,
         payment_status=order.payment_status,
         total=order.total,
