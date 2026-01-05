@@ -1522,7 +1522,10 @@ def update_order_status(order_id: int, data: OrderStatusUpdate, db: Session) -> 
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
     
-    valid_statuses = ["pending", "processing", "shipped", "delivered", "canceled", "refunded"]
+    valid_statuses = [
+        "pending", "pending_payment", "pending_verification", "awaiting_verification",
+        "paid", "processing", "shipped", "delivered", "canceled", "refunded"
+    ]
     if data.status not in valid_statuses:
         raise HTTPException(
             status_code=400,
@@ -1530,6 +1533,12 @@ def update_order_status(order_id: int, data: OrderStatusUpdate, db: Session) -> 
         )
     
     order.status = data.status
+    # If marking as paid, update payment_status and paid_at
+    if data.status == "paid":
+        order.payment_status = "completed"
+        if not order.paid_at:
+            order.paid_at = datetime.utcnow()
+    
     db.commit()
     db.refresh(order)
     

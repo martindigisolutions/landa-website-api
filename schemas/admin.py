@@ -483,7 +483,7 @@ class OrderAdminResponse(BaseModel):
 
 
 class OrderStatusUpdate(BaseModel):
-    status: str  # pending, processing, shipped, delivered, canceled, refunded
+    status: str  # pending, pending_payment, pending_verification, awaiting_verification, paid, processing, shipped, delivered, canceled, refunded
 
 
 class OrdersFilterParams(BaseModel):
