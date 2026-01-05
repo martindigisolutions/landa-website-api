@@ -91,30 +91,36 @@ resource "aws_iam_role" "apprunner_instance" {
 
 # IAM Policy para acceso a Secrets Manager y SSM
 resource "aws_iam_role_policy" "apprunner_secrets" {
+  count = length(var.secrets_manager_arns) > 0 || length(var.ssm_parameter_arns) > 0 ? 1 : 0
+  
   name = "${var.project_name}-apprunner-secrets-policy"
   role = aws_iam_role.apprunner_instance.id
 
   policy = jsonencode({
     Version = "2012-10-17"
-    Statement = [
-      {
-        Effect = "Allow"
-        Action = [
-          "secretsmanager:GetSecretValue",
-          "secretsmanager:DescribeSecret"
-        ]
-        Resource = var.secrets_manager_arns
-      },
-      {
-        Effect = "Allow"
-        Action = [
-          "ssm:GetParameter",
-          "ssm:GetParameters",
-          "ssm:GetParametersByPath"
-        ]
-        Resource = var.ssm_parameter_arns
-      }
-    ]
+    Statement = concat(
+      length(var.secrets_manager_arns) > 0 ? [
+        {
+          Effect = "Allow"
+          Action = [
+            "secretsmanager:GetSecretValue",
+            "secretsmanager:DescribeSecret"
+          ]
+          Resource = var.secrets_manager_arns
+        }
+      ] : [],
+      length(var.ssm_parameter_arns) > 0 ? [
+        {
+          Effect = "Allow"
+          Action = [
+            "ssm:GetParameter",
+            "ssm:GetParameters",
+            "ssm:GetParametersByPath"
+          ]
+          Resource = var.ssm_parameter_arns
+        }
+      ] : []
+    )
   })
 }
 
