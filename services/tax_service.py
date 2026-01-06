@@ -155,7 +155,18 @@ class TaxService:
                 response = await client.get(GRT_API_URL, params=params)
                 response.raise_for_status()
                 
-                data = response.json()
+                # Check if response is JSON before parsing
+                content_type = response.headers.get("content-type", "").lower()
+                if "application/json" not in content_type:
+                    logger.warning(f"GRT API returned non-JSON response (content-type: {content_type})")
+                    return None, "GRT API returned invalid response format"
+                
+                try:
+                    data = response.json()
+                except ValueError as e:
+                    logger.error(f"Failed to parse GRT API JSON response: {e}")
+                    return None, "GRT API returned invalid JSON"
+                
                 results = data.get("results", [])
                 
                 if results and results[0].get("success"):
@@ -166,10 +177,16 @@ class TaxService:
                 return None, "Address not found in GRT database"
                 
         except httpx.TimeoutException:
+            logger.warning("GRT API timeout after 10 seconds")
             return None, "GRT API timeout"
         except httpx.HTTPStatusError as e:
+            logger.error(f"GRT API HTTP error {e.response.status_code}: {e.response.text[:200]}")
             return None, f"GRT API error: {e.response.status_code}"
+        except httpx.RequestError as e:
+            logger.error(f"GRT API request error: {e}")
+            return None, f"GRT API connection error: {str(e)}"
         except Exception as e:
+            logger.error(f"Unexpected error calling GRT API: {e}", exc_info=True)
             return None, f"GRT API error: {str(e)}"
     
     def _call_grt_api_sync(self, address: TaxAddress) -> Tuple[Optional[float], Optional[str]]:
@@ -206,7 +223,18 @@ class TaxService:
                 response = client.get(GRT_API_URL, params=params)
                 response.raise_for_status()
                 
-                data = response.json()
+                # Check if response is JSON before parsing
+                content_type = response.headers.get("content-type", "").lower()
+                if "application/json" not in content_type:
+                    logger.warning(f"GRT API returned non-JSON response (content-type: {content_type})")
+                    return None, "GRT API returned invalid response format"
+                
+                try:
+                    data = response.json()
+                except ValueError as e:
+                    logger.error(f"Failed to parse GRT API JSON response: {e}")
+                    return None, "GRT API returned invalid JSON"
+                
                 results = data.get("results", [])
                 
                 if results and results[0].get("success"):
@@ -221,10 +249,16 @@ class TaxService:
                 return None, "Address not found in GRT database"
                 
         except httpx.TimeoutException:
+            logger.warning("GRT API timeout after 10 seconds")
             return None, "GRT API timeout"
         except httpx.HTTPStatusError as e:
+            logger.error(f"GRT API HTTP error {e.response.status_code}: {e.response.text[:200]}")
             return None, f"GRT API error: {e.response.status_code}"
+        except httpx.RequestError as e:
+            logger.error(f"GRT API request error: {e}")
+            return None, f"GRT API connection error: {str(e)}"
         except Exception as e:
+            logger.error(f"Unexpected error calling GRT API: {e}", exc_info=True)
             return None, f"GRT API error: {str(e)}"
     
     def calculate_tax(
