@@ -206,33 +206,43 @@ def create_lock(
     from services.tax_service import TaxService
     from schemas.settings import TaxAddress
     
-    # Calculate shipping
+    # Calculate shipping with error handling
     cart_items_for_shipping = [
         {"product_id": item.product_id, "variant_id": item.variant_id, "quantity": item.quantity}
         for item, _, _ in items_to_reserve
     ]
-    shipping_fee = calculate_shipping_cost(cart_items_for_shipping, db)
+    try:
+        shipping_fee = calculate_shipping_cost(cart_items_for_shipping, db)
+    except Exception as e:
+        logger.error(f"Error calculating shipping: {e}")
+        shipping_fee = 0.0  # Fallback to free shipping on error
     
-    # Calculate tax
-    tax_service = TaxService(db)
-    tax_address = None
-    if cart.shipping_city and cart.shipping_state and cart.shipping_zipcode:
-        tax_address = TaxAddress(
-            street_number="",
-            street_name=cart.shipping_street or "",
-            city=cart.shipping_city,
-            state=cart.shipping_state,
-            zipcode=cart.shipping_zipcode
+    # Calculate tax with error handling
+    tax_amount = 0.0
+    try:
+        tax_service = TaxService(db)
+        tax_address = None
+        if cart.shipping_city and cart.shipping_state and cart.shipping_zipcode:
+            tax_address = TaxAddress(
+                street_number="",
+                street_name=cart.shipping_street or "",
+                city=cart.shipping_city,
+                state=cart.shipping_state,
+                zipcode=cart.shipping_zipcode
+            )
+        
+        tax_result = tax_service.calculate_tax(
+            subtotal=subtotal,
+            shipping_fee=shipping_fee,
+            address=tax_address,
+            is_pickup=cart.is_pickup or False
         )
+        tax_amount = tax_result.tax_amount if tax_result.success else 0.0
+    except Exception as e:
+        logger.error(f"Error calculating tax: {e}")
+        tax_amount = 0.0  # Fallback to no tax on error
     
-    tax_result = tax_service.calculate_tax(
-        subtotal=subtotal,
-        shipping_fee=shipping_fee,
-        address=tax_address,
-        is_pickup=cart.is_pickup or False
-    )
-    
-    total = round(subtotal + shipping_fee + tax_result.tax_amount, 2)
+    total = round(subtotal + shipping_fee + tax_amount, 2)
     
     # Create lock
     lock_token = _generate_lock_token()
@@ -244,7 +254,7 @@ def create_lock(
         status="active",
         subtotal=subtotal,
         shipping_fee=shipping_fee,
-        tax=tax_result.tax_amount,
+        tax=tax_amount,
         total=total,
         expires_at=expires_at
     )

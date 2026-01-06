@@ -472,8 +472,20 @@ def create_lock(
             detail="X-Session-ID header is required for guest users"
         )
     
-    cart = cart_service.get_or_create_cart(db, session_id, user)
-    return cart_lock_service.create_lock(db, cart)
+    try:
+        cart = cart_service.get_or_create_cart(db, session_id, user)
+        return cart_lock_service.create_lock(db, cart)
+    except Exception as e:
+        import logging
+        logger = logging.getLogger("landa-api.cart")
+        logger.error(f"Error creating cart lock: {e}", exc_info=True)
+        # Always return valid JSON, even on error
+        from schemas.cart import LockCartResponse
+        return LockCartResponse(
+            success=False,
+            error="internal_error",
+            message="An error occurred while creating the lock. Please try again."
+        )
 
 
 @router.delete(
