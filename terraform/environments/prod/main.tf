@@ -287,12 +287,12 @@ variable "project_name" {
 
 variable "cpu" {
   description = "CPU units for App Runner (256, 512, 1024, 2048, 4096)"
-  default     = "512"  # Optimizado: empezar con 0.5 vCPU, escalar si es necesario
+  default     = "1024"  # 1 vCPU - minimum for production workloads
 }
 
 variable "memory" {
   description = "Memory in MB for App Runner"
-  default     = "1024"  # Optimizado: empezar con 1GB, escalar si es necesario
+  default     = "2048"  # 2 GB RAM - minimum for production workloads
 }
 
 variable "min_instances" {
