@@ -7,6 +7,7 @@ Create Date: 2024-12-16 12:00:00.000000
 """
 from alembic import op
 import sqlalchemy as sa
+from sqlalchemy import inspect
 
 
 # revision identifiers, used by Alembic.
@@ -17,9 +18,16 @@ depends_on = None
 
 
 def upgrade() -> None:
-    # Add bestseller_order and recommended_order columns to products table
-    op.add_column('products', sa.Column('bestseller_order', sa.Integer(), nullable=True, server_default='0'))
-    op.add_column('products', sa.Column('recommended_order', sa.Integer(), nullable=True, server_default='0'))
+    # Check if columns exist before adding them
+    conn = op.get_bind()
+    inspector = sa.inspect(conn)
+    columns = [col['name'] for col in inspector.get_columns('products')]
+    
+    if 'bestseller_order' not in columns:
+        op.add_column('products', sa.Column('bestseller_order', sa.Integer(), nullable=True, server_default='0'))
+    
+    if 'recommended_order' not in columns:
+        op.add_column('products', sa.Column('recommended_order', sa.Integer(), nullable=True, server_default='0'))
 
 
 def downgrade() -> None:

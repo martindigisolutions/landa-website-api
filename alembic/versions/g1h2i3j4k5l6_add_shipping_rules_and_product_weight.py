@@ -9,6 +9,7 @@ from typing import Sequence, Union
 
 from alembic import op
 import sqlalchemy as sa
+from sqlalchemy import inspect
 
 
 # revision identifiers, used by Alembic.
@@ -20,14 +21,15 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     # Add weight_lbs column to products table (if not exists)
-    # SQLite doesn't support IF NOT EXISTS for ADD COLUMN, so we check first
     conn = op.get_bind()
-    columns = [col['name'] for col in conn.execute(sa.text("PRAGMA table_info(products)")).mappings()]
-    if 'weight_lbs' not in columns:
+    inspector = sa.inspect(conn)
+    product_columns = [col['name'] for col in inspector.get_columns('products')]
+    
+    if 'weight_lbs' not in product_columns:
         op.add_column('products', sa.Column('weight_lbs', sa.Float(), nullable=True, server_default='0.0'))
     
     # Create shipping_rules table (if not exists)
-    tables = [t[0] for t in conn.execute(sa.text("SELECT name FROM sqlite_master WHERE type='table'")).fetchall()]
+    tables = inspector.get_table_names()
     if 'shipping_rules' not in tables:
         op.create_table(
             'shipping_rules',

@@ -9,6 +9,7 @@ from typing import Sequence, Union
 
 from alembic import op
 import sqlalchemy as sa
+from sqlalchemy import inspect
 
 
 # revision identifiers, used by Alembic.
@@ -19,11 +20,17 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    # Add active column to products table with default True
-    # Works on both SQLite and PostgreSQL
-    op.add_column('products', sa.Column('active', sa.Boolean(), 
-                                        nullable=False, 
-                                        server_default=sa.text('TRUE')))
+    # Check if column exists before adding it
+    conn = op.get_bind()
+    inspector = sa.inspect(conn)
+    columns = [col['name'] for col in inspector.get_columns('products')]
+    
+    if 'active' not in columns:
+        # Add active column to products table with default True
+        # Works on both SQLite and PostgreSQL
+        op.add_column('products', sa.Column('active', sa.Boolean(), 
+                                            nullable=False, 
+                                            server_default=sa.text('TRUE')))
 
 
 def downgrade() -> None:

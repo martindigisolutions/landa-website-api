@@ -9,6 +9,7 @@ from typing import Sequence, Union
 
 from alembic import op
 import sqlalchemy as sa
+from sqlalchemy import inspect
 
 
 # revision identifiers, used by Alembic.
@@ -19,21 +20,26 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    # Create user_favorites table
-    op.create_table(
-        'user_favorites',
-        sa.Column('id', sa.Integer(), nullable=False),
-        sa.Column('user_id', sa.Integer(), nullable=False),
-        sa.Column('product_id', sa.Integer(), nullable=False),
-        sa.Column('created_at', sa.DateTime(), nullable=True),
-        sa.ForeignKeyConstraint(['user_id'], ['users.id'], ondelete='CASCADE'),
-        sa.ForeignKeyConstraint(['product_id'], ['products.id'], ondelete='CASCADE'),
-        sa.PrimaryKeyConstraint('id')
-    )
-    op.create_index(op.f('ix_user_favorites_id'), 'user_favorites', ['id'], unique=False)
-    op.create_index(op.f('ix_user_favorites_user_id'), 'user_favorites', ['user_id'], unique=False)
-    # Unique constraint to prevent duplicate favorites
-    op.create_index('ix_user_favorites_user_product', 'user_favorites', ['user_id', 'product_id'], unique=True)
+    # Check if table exists before creating it
+    conn = op.get_bind()
+    inspector = sa.inspect(conn)
+    tables = inspector.get_table_names()
+    
+    if 'user_favorites' not in tables:
+        op.create_table(
+            'user_favorites',
+            sa.Column('id', sa.Integer(), nullable=False),
+            sa.Column('user_id', sa.Integer(), nullable=False),
+            sa.Column('product_id', sa.Integer(), nullable=False),
+            sa.Column('created_at', sa.DateTime(), nullable=True),
+            sa.ForeignKeyConstraint(['user_id'], ['users.id'], ondelete='CASCADE'),
+            sa.ForeignKeyConstraint(['product_id'], ['products.id'], ondelete='CASCADE'),
+            sa.PrimaryKeyConstraint('id')
+        )
+        op.create_index(op.f('ix_user_favorites_id'), 'user_favorites', ['id'], unique=False)
+        op.create_index(op.f('ix_user_favorites_user_id'), 'user_favorites', ['user_id'], unique=False)
+        # Unique constraint to prevent duplicate favorites
+        op.create_index('ix_user_favorites_user_product', 'user_favorites', ['user_id', 'product_id'], unique=True)
 
 
 def downgrade() -> None:

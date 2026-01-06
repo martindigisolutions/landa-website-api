@@ -28,7 +28,10 @@ def upgrade() -> None:
     
     if 'combined_group_id' not in orders_columns:
         op.add_column('orders', sa.Column('combined_group_id', sa.String(), nullable=True))
-        op.create_index('ix_orders_combined_group_id', 'orders', ['combined_group_id'])
+        # Check if index exists before creating it
+        indexes = [idx['name'] for idx in inspector.get_indexes('orders')]
+        if 'ix_orders_combined_group_id' not in indexes:
+            op.create_index('ix_orders_combined_group_id', 'orders', ['combined_group_id'])
     
     if 'combined' not in orders_columns:
         op.add_column('orders', sa.Column('combined', sa.Boolean(), nullable=True, server_default='0'))
@@ -38,7 +41,10 @@ def upgrade() -> None:
     
     if 'combined_group_id' not in shipments_columns:
         op.add_column('order_shipments', sa.Column('combined_group_id', sa.String(), nullable=True))
-        op.create_index('ix_order_shipments_combined_group_id', 'order_shipments', ['combined_group_id'])
+        # Check if index exists before creating it
+        shipment_indexes = [idx['name'] for idx in inspector.get_indexes('order_shipments')]
+        if 'ix_order_shipments_combined_group_id' not in shipment_indexes:
+            op.create_index('ix_order_shipments_combined_group_id', 'order_shipments', ['combined_group_id'])
     
     # Create combined_orders table
     tables = inspector.get_table_names()
