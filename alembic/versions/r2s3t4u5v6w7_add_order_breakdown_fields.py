@@ -19,14 +19,22 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    # Add subtotal column
-    op.add_column('orders', sa.Column('subtotal', sa.Float(), nullable=True))
+    # Check if columns exist before adding them
+    conn = op.get_bind()
+    inspector = sa.inspect(conn)
+    order_columns = [col['name'] for col in inspector.get_columns('orders')]
     
-    # Add tax column
-    op.add_column('orders', sa.Column('tax', sa.Float(), nullable=True))
+    # Add subtotal column if it doesn't exist
+    if 'subtotal' not in order_columns:
+        op.add_column('orders', sa.Column('subtotal', sa.Float(), nullable=True))
     
-    # Add shipping_fee column
-    op.add_column('orders', sa.Column('shipping_fee', sa.Float(), nullable=True))
+    # Add tax column if it doesn't exist
+    if 'tax' not in order_columns:
+        op.add_column('orders', sa.Column('tax', sa.Float(), nullable=True))
+    
+    # Add shipping_fee column if it doesn't exist
+    if 'shipping_fee' not in order_columns:
+        op.add_column('orders', sa.Column('shipping_fee', sa.Float(), nullable=True))
 
 
 def downgrade() -> None:

@@ -20,12 +20,29 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     """Add Stripe payment fields to orders table."""
-    op.add_column('orders', sa.Column('stripe_payment_intent_id', sa.String(), nullable=True))
-    op.add_column('orders', sa.Column('payment_status', sa.String(), nullable=True, server_default='pending'))
-    op.add_column('orders', sa.Column('paid_at', sa.DateTime(), nullable=True))
+    # Check if columns exist before adding them
+    conn = op.get_bind()
+    inspector = sa.inspect(conn)
+    order_columns = [col['name'] for col in inspector.get_columns('orders')]
     
-    # Create index on stripe_payment_intent_id for faster lookups
-    op.create_index('ix_orders_stripe_payment_intent_id', 'orders', ['stripe_payment_intent_id'])
+    # Add columns only if they don't exist
+    if 'stripe_payment_intent_id' not in order_columns:
+        op.add_column('orders', sa.Column('stripe_payment_intent_id', sa.String(), nullable=True))
+    
+    if 'payment_status' not in order_columns:
+        op.add_column('orders', sa.Column('payment_status', sa.String(), nullable=True, server_default='pending'))
+    
+    if 'paid_at' not in order_columns:
+        op.add_column('orders', sa.Column('paid_at', sa.DateTime(), nullable=True))
+    
+    # Create index on stripe_payment_intent_id for faster lookups (if column exists and index doesn't)
+    existing_indexes = [idx['name'] for idx in inspector.get_indexes('orders')]
+    if 'stripe_payment_intent_id' in order_columns and 'ix_orders_stripe_payment_intent_id' not in existing_indexes:
+        try:
+            op.create_index('ix_orders_stripe_payment_intent_id', 'orders', ['stripe_payment_intent_id'])
+        except Exception:
+            # Index might already exist, ignore
+            pass
 
 
 def downgrade() -> None:
