@@ -277,11 +277,10 @@ def create_lock(
     if cart.payment_method == "stripe":
         try:
             import stripe
-            import os
+            from config import STRIPE_SECRET_KEY
             
-            stripe.api_key = os.getenv("STRIPE_SECRET_KEY")
-            
-            if stripe.api_key:
+            if STRIPE_SECRET_KEY:
+                stripe.api_key = STRIPE_SECRET_KEY
                 intent = stripe.PaymentIntent.create(
                     amount=int(total * 100),  # Convert to cents
                     currency="usd",
@@ -298,10 +297,21 @@ def create_lock(
                 )
                 logger.info(f"Created Stripe PaymentIntent {intent.id} for lock {lock_token}")
             else:
-                logger.warning("STRIPE_SECRET_KEY not configured, skipping PaymentIntent creation")
+                logger.error("STRIPE_SECRET_KEY not configured! Cannot create PaymentIntent for Stripe payment.")
+                # Return error - Stripe cannot work without API key
+                return LockCartResponse(
+                    success=False,
+                    error="stripe_not_configured",
+                    message="Stripe payment is not available. Please select another payment method."
+                )
         except Exception as e:
-            logger.error(f"Failed to create Stripe PaymentIntent: {e}")
-            # Continue without Stripe intent - can be created later
+            logger.error(f"Failed to create Stripe PaymentIntent: {e}", exc_info=True)
+            # Return error instead of continuing without PaymentIntent
+            return LockCartResponse(
+                success=False,
+                error="stripe_error",
+                message=f"Failed to initialize Stripe payment: {str(e)}"
+            )
     
     db.commit()
     

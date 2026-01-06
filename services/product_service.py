@@ -2,12 +2,12 @@
 Product service for public frontend with localization support
 """
 from typing import List, Optional
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload, selectinload
 from sqlalchemy import or_, and_
 from collections import defaultdict
 from fastapi import HTTPException
 
-from models import Product, CategoryGroup, Category, ProductCategory, UserFavorite, User
+from models import Product, CategoryGroup, Category, ProductCategory, UserFavorite, User, ProductVariantGroup, ProductVariant
 from schemas.product import (
     ProductPublic, 
     ProductVariantPublic, 
@@ -395,8 +395,13 @@ def get_products(
     else:
         query = query.order_by(Product.name)
     
-    # Paginate
+    # Paginate with eager loading to prevent N+1 queries
     offset = (page - 1) * page_size
+    # Eager load relationships to avoid N+1 queries
+    query = query.options(
+        selectinload(Product.variant_groups).selectinload(ProductVariantGroup.variants),
+        selectinload(Product.product_categories).joinedload(ProductCategory.category)
+    )
     products = query.offset(offset).limit(page_size).all()
     
     return PaginatedProductResponse(
@@ -405,13 +410,17 @@ def get_products(
         total_items=total_items,
         total_pages=total_pages,
         sorted_by=sort_by,
-        results=[_product_to_public(p, lang, db) for p in products]
+        results=[_product_to_public(p, lang, None) for p in products]  # Pass None for db to skip related products in list
     )
 
 
 def get_product_by_id(db: Session, product_id: int, lang: str = "es") -> ProductPublic:
     """Get a single product by ID with localization and resolved related products"""
-    product = db.query(Product).filter(
+    # Eager load relationships to avoid N+1 queries
+    product = db.query(Product).options(
+        selectinload(Product.variant_groups).selectinload(ProductVariantGroup.variants),
+        selectinload(Product.product_categories).joinedload(ProductCategory.category)
+    ).filter(
         Product.id == product_id,
         Product.active == True  # Exclude soft-deleted products
     ).first()

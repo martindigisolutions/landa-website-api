@@ -1,5 +1,5 @@
 import logging
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from fastapi import HTTPException
 from models import Product, ProductVariant, Order, OrderItem, Cart, CartItem, User, CombinedOrder
 from schemas.checkout import (
@@ -18,15 +18,23 @@ def _get_cart(db: Session, session_id: Optional[str], user_id: Optional[int]) ->
     Priority: user_id first, then fallback to session_id.
     This handles the case where a guest adds items, then logs in without merging.
     """
+    from sqlalchemy.orm import joinedload
+    
     cart = None
     
-    # Try to find by user_id first
+    # Try to find by user_id first with eager loading
     if user_id:
-        cart = db.query(Cart).filter(Cart.user_id == user_id).first()
+        cart = db.query(Cart).options(
+            joinedload(Cart.items).joinedload(CartItem.product),
+            joinedload(Cart.items).joinedload(CartItem.variant)
+        ).filter(Cart.user_id == user_id).first()
     
     # If no user cart found, try session_id (for logged-in users with unmerged guest carts)
     if not cart and session_id:
-        cart = db.query(Cart).filter(
+        cart = db.query(Cart).options(
+            joinedload(Cart.items).joinedload(CartItem.product),
+            joinedload(Cart.items).joinedload(CartItem.variant)
+        ).filter(
             Cart.session_id == session_id,
             Cart.user_id == None
         ).first()
@@ -307,6 +315,25 @@ def create_order(
                 "price": reservation.unit_price
             })
         
+        # Determine order status based on payment method
+        # IMPORTANT: Stripe orders should only be "paid" if PaymentIntent was successfully created
+        # If no PaymentIntent exists, it means Stripe is not configured or failed, so mark as pending
+        if payment_method == "stripe":
+            if lock.stripe_payment_intent_id:
+                # PaymentIntent was created successfully - order is paid (will be confirmed by webhook)
+                order_status = "paid"
+                payment_status = "pending"  # Will be updated to "completed" by webhook
+            else:
+                # No PaymentIntent - Stripe not configured or failed
+                # This should not happen, but handle gracefully
+                logger.warning(f"Stripe payment selected but no PaymentIntent found for lock {lock.token}. Marking as pending_payment.")
+                order_status = "pending_payment"
+                payment_status = "pending"
+        else:
+            # Non-Stripe payment methods require manual verification
+            order_status = "pending_verification"
+            payment_status = "pending"
+        
         # Create order with frozen totals from lock
         order = Order(
             session_id=session_id,
@@ -318,13 +345,31 @@ def create_order(
             tax=lock.tax,
             shipping_fee=lock.shipping_fee,
             total=total,  # Use lock.total which matches subtotal + tax + shipping_fee
-            status="paid" if payment_method == "stripe" else "pending_verification",
+            status=order_status,
+            payment_status=payment_status,
             stripe_payment_intent_id=lock.stripe_payment_intent_id
         )
         db.add(order)
         db.flush()
         
         # Create order items and deduct stock permanently
+        # OPTIMIZATION: Batch load all products and variants to avoid N+1 queries
+        variant_ids = [item["variant_id"] for item in order_items_data if item["variant_id"]]
+        product_ids = [item["product_id"] for item in order_items_data if not item["variant_id"]]
+        
+        # Load all variants in one query
+        variants_dict = {}
+        if variant_ids:
+            variants = db.query(ProductVariant).filter(ProductVariant.id.in_(variant_ids)).all()
+            variants_dict = {v.id: v for v in variants}
+        
+        # Load all products in one query
+        products_dict = {}
+        if product_ids:
+            products = db.query(Product).filter(Product.id.in_(product_ids)).all()
+            products_dict = {p.id: p for p in products}
+        
+        # Create order items and deduct stock
         for item_data in order_items_data:
             db.add(OrderItem(
                 order_id=order.id,
@@ -335,19 +380,15 @@ def create_order(
                 price=item_data["price"]
             ))
             
-            # Deduct stock (was reserved, now permanent)
+            # Deduct stock (was reserved, now permanent) - using pre-loaded objects
             if item_data["variant_id"]:
-                variant = db.query(ProductVariant).filter(
-                    ProductVariant.id == item_data["variant_id"]
-                ).first()
+                variant = variants_dict.get(item_data["variant_id"])
                 if variant:
                     variant.stock = max(0, (variant.stock or 0) - item_data["quantity"])
                     if variant.stock <= 0:
                         variant.is_in_stock = False
             else:
-                product = db.query(Product).filter(
-                    Product.id == item_data["product_id"]
-                ).first()
+                product = products_dict.get(item_data["product_id"])
                 if product:
                     product.stock = max(0, (product.stock or 0) - item_data["quantity"])
                     if product.stock <= 0:
