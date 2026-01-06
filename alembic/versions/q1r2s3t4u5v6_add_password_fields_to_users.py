@@ -19,11 +19,18 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    # Add password_requires_update column
-    op.add_column('users', sa.Column('password_requires_update', sa.Boolean(), nullable=True, server_default='0'))
+    # Check if columns exist before adding them
+    conn = op.get_bind()
+    inspector = sa.inspect(conn)
+    user_columns = [col['name'] for col in inspector.get_columns('users')]
     
-    # Add password_last_updated column
-    op.add_column('users', sa.Column('password_last_updated', sa.DateTime(), nullable=True))
+    # Add password_requires_update column if it doesn't exist
+    if 'password_requires_update' not in user_columns:
+        op.add_column('users', sa.Column('password_requires_update', sa.Boolean(), nullable=True, server_default='0'))
+    
+    # Add password_last_updated column if it doesn't exist
+    if 'password_last_updated' not in user_columns:
+        op.add_column('users', sa.Column('password_last_updated', sa.DateTime(), nullable=True))
     
     # Note: SQLite doesn't support ALTER COLUMN, so we can't change hashed_password to nullable
     # In production (PostgreSQL), you may need to run this manually if needed:
