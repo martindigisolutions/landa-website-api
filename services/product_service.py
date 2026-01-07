@@ -3,7 +3,7 @@ Product service for public frontend with localization support
 """
 from typing import List, Optional
 from sqlalchemy.orm import Session, joinedload, selectinload
-from sqlalchemy import or_, and_
+from sqlalchemy import or_, and_, case, func
 from collections import defaultdict
 from fastapi import HTTPException
 
@@ -271,7 +271,7 @@ def get_products(
     similar_to: Optional[str] = None,
     page: int = 1,
     page_size: int = 20,
-    sort_by: str = "name"
+    sort_by: str = "recommended"
 ) -> PaginatedProductResponse:
     """Get paginated list of products with localization.
     
@@ -380,20 +380,46 @@ def get_products(
     total_pages = (total_items + page_size - 1) // page_size
     
     # Sort
+    # For price sorting, use effective price: sale_price if exists, otherwise regular_price
+    # This matches what the user sees in the frontend
+    # Use COALESCE to get sale_price if not null, otherwise regular_price
+    effective_price = func.coalesce(Product.sale_price, Product.regular_price)
     if sort_by == "price_asc":
-        query = query.order_by(Product.regular_price.asc())
+        query = query.order_by(effective_price.asc())
     elif sort_by == "price_desc":
-        query = query.order_by(Product.regular_price.desc())
+        query = query.order_by(effective_price.desc())
     elif sort_by == "newest":
         query = query.order_by(Product.created_at.desc())
+    elif sort_by == "name_asc":
+        query = query.order_by(Product.name.asc())
+    elif sort_by == "name_desc":
+        query = query.order_by(Product.name.desc())
+    elif sort_by == "name":
+        # Default to ascending for backward compatibility
+        query = query.order_by(Product.name.asc())
     elif sort_by == "bestseller":
-        # Products with bestseller_order > 0 first, then by order ascending
-        query = query.filter(Product.bestseller_order > 0).order_by(Product.bestseller_order.asc())
+        # Show all products, but prioritize those with bestseller_order > 0
+        # Products with order > 0 first (ordered by position), then others (ordered by name)
+        query = query.order_by(
+            case((Product.bestseller_order > 0, 0), else_=1).asc(),  # 0 = has order, 1 = no order
+            Product.bestseller_order.asc(),  # Order by position (nulls are treated as 0 by default)
+            Product.name.asc()  # Secondary sort by name
+        )
     elif sort_by == "recommended":
-        # Products with recommended_order > 0 first, then by order ascending
-        query = query.filter(Product.recommended_order > 0).order_by(Product.recommended_order.asc())
+        # Show all products, but prioritize those with recommended_order > 0
+        # Products with order > 0 first (ordered by position), then others (ordered by name)
+        query = query.order_by(
+            case((Product.recommended_order > 0, 0), else_=1).asc(),  # 0 = has order, 1 = no order
+            Product.recommended_order.asc(),  # Order by position (nulls are treated as 0 by default)
+            Product.name.asc()  # Secondary sort by name
+        )
     else:
-        query = query.order_by(Product.name)
+        # Fallback to recommended if unknown sort_by value
+        query = query.order_by(
+            case((Product.recommended_order > 0, 0), else_=1).asc(),
+            Product.recommended_order.asc(),
+            Product.name.asc()
+        )
     
     # Paginate with eager loading to prevent N+1 queries
     offset = (page - 1) * page_size

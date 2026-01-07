@@ -78,7 +78,7 @@ def get_products(
     category: Optional[List[str]] = Query(None, description="Filter by category slug(s). Can be repeated for multiple categories."),
     category_group: Optional[str] = Query(None, description="Filter by category group slug"),
     similar_to: Optional[str] = Query(None, description="Get similar products for this product (seller_sku or product ID)"),
-    sort_by: Optional[str] = Query("name", description="Sort by: name, price_asc, price_desc, newest, bestseller, recommended"),
+    sort_by: Optional[str] = Query("recommended", description="Sort by: recommended, bestseller, name, name_asc, name_desc, price_asc, price_desc, newest"),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100)
 ):
