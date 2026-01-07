@@ -62,8 +62,11 @@ resource "aws_secretsmanager_secret_version" "database_url" {
 }
 
 # ============================================
-# App Secrets in Secrets Manager
+# App Secrets in Secrets Manager (Single JSON secret)
 # ============================================
+# Use a single JSON secret to save costs ($0.40/mes instead of $2.00/mes)
+# The application will parse the JSON and extract individual values
+
 # Try to find existing app_secrets secret first
 data "aws_secretsmanager_secret" "app_secrets_existing" {
   count = var.use_secrets_manager ? 1 : 0
@@ -76,7 +79,7 @@ resource "aws_secretsmanager_secret" "app_secrets" {
   count = var.use_secrets_manager && length(data.aws_secretsmanager_secret.app_secrets_existing) == 0 ? 1 : 0
 
   name        = "${var.project_name}/app-secrets"
-  description = "Application secrets (SECRET_KEY, STRIPE keys, ADMIN keys, etc.)"
+  description = "Application secrets (SECRET_KEY, STRIPE keys, ADMIN keys, etc.) as JSON"
 
   tags = var.tags
 }
@@ -105,9 +108,8 @@ locals {
 #   --secret-id landa-beauty-api/app-secrets \
 #   --secret-string '{"SECRET_KEY":"...","STRIPE_SECRET_KEY":"...","STRIPE_WEBHOOK_SECRET":"...","ADMIN_CLIENT_ID":"...","ADMIN_CLIENT_SECRET":"..."}'
 #
-# This uses a single secret JSON to save costs (only 1 secret instead of 5)
-# Each environment variable in App Runner will extract its specific key from the JSON
-# using the format: arn:aws:secretsmanager:...:secret:name-6chars:key::KEY_NAME
+# This uses a single secret JSON to save costs ($0.40/mes instead of $2.00/mes)
+# The application (config.py) will parse the JSON and extract individual values
 
 # ============================================
 # SNS Topic for Alerts (Production Monitoring)
@@ -208,18 +210,15 @@ module "apprunner" {
   allowed_origins = var.allowed_origins
 
   # Secrets Manager configuration (SECURITY: Use Secrets Manager for sensitive vars)
+  # Use a single JSON secret - the application will parse it (see config.py)
   runtime_environment_secrets = merge(
     var.use_secrets_manager && var.create_rds ? {
       DATABASE_URL = aws_secretsmanager_secret.database_url[0].arn
     } : {},
     var.use_secrets_manager && local.app_secrets_arn != null ? {
-      # Each variable points to a specific key in the JSON secret
-      # Format: arn:aws:secretsmanager:region:account:secret:name-6chars:key::KEY_NAME
-      SECRET_KEY          = "${local.app_secrets_arn}:key::SECRET_KEY"
-      STRIPE_SECRET_KEY   = "${local.app_secrets_arn}:key::STRIPE_SECRET_KEY"
-      STRIPE_WEBHOOK_SECRET = "${local.app_secrets_arn}:key::STRIPE_WEBHOOK_SECRET"
-      ADMIN_CLIENT_ID     = "${local.app_secrets_arn}:key::ADMIN_CLIENT_ID"
-      ADMIN_CLIENT_SECRET = "${local.app_secrets_arn}:key::ADMIN_CLIENT_SECRET"
+      # Pass the entire JSON secret as APP_SECRETS_JSON
+      # The application (config.py) will parse it and extract individual values
+      APP_SECRETS_JSON = local.app_secrets_arn
     } : {}
   )
 
@@ -432,7 +431,7 @@ output "database_secret_arn" {
 
 output "app_secrets_arn" {
   value       = var.use_secrets_manager ? local.app_secrets_arn : null
-  description = "ARN of the app secrets in Secrets Manager"
+  description = "ARN of the app secrets JSON in Secrets Manager"
 }
 
 # ============================================
