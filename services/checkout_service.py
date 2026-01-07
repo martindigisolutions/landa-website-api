@@ -316,18 +316,20 @@ def create_order(
             })
         
         # Determine order status based on payment method
-        # IMPORTANT: Stripe orders should only be "paid" if PaymentIntent was successfully created
-        # If no PaymentIntent exists, it means Stripe is not configured or failed, so mark as pending
+        # IMPORTANT: For Stripe, the frontend already confirmed payment, so we start as "processing_payment"
+        # The webhook will change it to "paid" when Stripe confirms
         if payment_method == "stripe":
             if lock.stripe_payment_intent_id:
-                # PaymentIntent was created successfully - order is paid (will be confirmed by webhook)
-                order_status = "paid"
+                # PaymentIntent was created and frontend confirmed payment
+                # Order starts as "processing_payment" until webhook confirms payment
+                order_status = "processing_payment"
                 payment_status = "pending"  # Will be updated to "completed" by webhook
+                logger.info(f"Order created with Stripe PaymentIntent {lock.stripe_payment_intent_id}. Status: processing_payment, waiting for webhook confirmation.")
             else:
                 # No PaymentIntent - Stripe not configured or failed
                 # This should not happen, but handle gracefully
-                logger.warning(f"Stripe payment selected but no PaymentIntent found for lock {lock.token}. Marking as pending_payment.")
-                order_status = "pending_payment"
+                logger.warning(f"Stripe payment selected but no PaymentIntent found for lock {lock.token}. Marking as processing_payment.")
+                order_status = "processing_payment"
                 payment_status = "pending"
         else:
             # Non-Stripe payment methods require manual verification
@@ -350,7 +352,47 @@ def create_order(
             stripe_payment_intent_id=lock.stripe_payment_intent_id
         )
         db.add(order)
-        db.flush()
+        db.flush()  # Get order.id
+        
+        # Update PaymentIntent metadata with order_id for webhook lookup
+        if lock.stripe_payment_intent_id and payment_method == "stripe":
+            try:
+                import stripe
+                from config import STRIPE_SECRET_KEY
+                if STRIPE_SECRET_KEY:
+                    stripe.api_key = STRIPE_SECRET_KEY
+                    stripe.PaymentIntent.modify(
+                        lock.stripe_payment_intent_id,
+                        metadata={
+                            "order_id": str(order.id),
+                            "lock_token": lock.token,
+                            "cart_id": str(lock.cart_id)
+                        }
+                    )
+                    logger.info(f"Updated PaymentIntent {lock.stripe_payment_intent_id} metadata with order_id {order.id}")
+                    
+                    # IMPORTANT: Check if PaymentIntent is already succeeded (webhook may have arrived before order creation)
+                    # If so, update order status immediately instead of waiting for webhook
+                    try:
+                        import stripe
+                        from config import STRIPE_SECRET_KEY
+                        if STRIPE_SECRET_KEY:
+                            stripe.api_key = STRIPE_SECRET_KEY
+                            pi = stripe.PaymentIntent.retrieve(lock.stripe_payment_intent_id)
+                            if pi.status == "succeeded" and order.status == "processing_payment":
+                                logger.info(f"PaymentIntent {lock.stripe_payment_intent_id} already succeeded, updating order #{order.id} to paid immediately")
+                                order.status = "paid"
+                                order.payment_status = "completed"
+                                from datetime import datetime
+                                order.paid_at = datetime.utcnow()
+                                db.commit()
+                                logger.info(f"Order #{order.id} updated to paid immediately (webhook arrived before order creation)")
+                    except Exception as e:
+                        logger.warning(f"Failed to check PaymentIntent status: {e}")
+                        # Non-critical, webhook will handle it
+            except Exception as e:
+                logger.warning(f"Failed to update PaymentIntent metadata: {e}")
+                # Non-critical, webhook can still find order by stripe_payment_intent_id
         
         # Create order items and deduct stock permanently
         # OPTIMIZATION: Batch load all products and variants to avoid N+1 queries
@@ -561,7 +603,7 @@ def confirm_manual_payment(data: ConfirmManualPayment, db: Session):
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
 
-    if order.status != "pending_payment":
+    if order.status not in ["pending_payment", "processing_payment"]:
         raise HTTPException(status_code=400, detail="Order cannot be marked as paid in current state")
 
     order.status = "awaiting_verification"
@@ -786,6 +828,7 @@ def get_order_detail(order_id: str, user_id: str, db: Session):
     return {
         "order_id": str(order.id),
         "status": order.status,
+        "payment_status": order.payment_status or "pending",  # Include payment_status
         "total": order.total,
         "subtotal": subtotal,
         "shipping_cost": shipping_cost,
@@ -796,11 +839,13 @@ def get_order_detail(order_id: str, user_id: str, db: Session):
         "address": address,
         "shipping_method": order.shipping_method,
         "payment_method": order.payment_method,
+        "stripe_payment_intent_id": order.stripe_payment_intent_id,  # Include for Stripe orders
         "tracking_number": getattr(order, 'tracking_number', None),  # Deprecated, kept for backwards compatibility
         "tracking_url": getattr(order, 'tracking_url', None),  # Deprecated, kept for backwards compatibility
         "shipped_at": getattr(order, 'shipped_at', None),  # Deprecated, kept for backwards compatibility
         "shipments": [s.model_dump() for s in shipments],  # New: list of all shipments
-        "created_at": order.created_at
+        "created_at": order.created_at,
+        "paid_at": order.paid_at  # Include paid_at timestamp
     }
 
 
@@ -826,11 +871,11 @@ def update_order_address(order_id: str, user_id: str, address_data: dict, db: Se
         raise HTTPException(status_code=403, detail="You don't have permission to modify this order")
     
     # Verificar que el estado permite modificación
-    allowed_statuses = ["pending_payment", "awaiting_verification"]
+    allowed_statuses = ["pending_payment", "processing_payment", "awaiting_verification"]
     if order.status not in allowed_statuses:
         raise HTTPException(
             status_code=409, 
-            detail=f"Cannot update address. Order status '{order.status}' does not allow modifications. Address can only be updated when status is 'pending_payment' or 'awaiting_verification'."
+            detail=f"Cannot update address. Order status '{order.status}' does not allow modifications. Address can only be updated when status is 'pending_payment', 'processing_payment', or 'awaiting_verification'."
         )
     
     # Actualizar la dirección

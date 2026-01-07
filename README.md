@@ -222,10 +222,22 @@ Usa estas tarjetas de prueba en modo Test:
 
 | Número | Resultado |
 |--------|-----------|
-| `4242 4242 4242 4242` | ✅ Pago exitoso |
-| `4000 0000 0000 0002` | ❌ Tarjeta rechazada |
+| `4242 4242 4242 4242` | ✅ Pago exitoso (Visa) |
+| `4000 0000 0000 0002` | ❌ Tarjeta rechazada (genérico) |
 | `4000 0000 0000 3220` | 🔐 Requiere 3D Secure |
 | `4000 0000 0000 9995` | ❌ Fondos insuficientes |
+| `4000 0000 0000 0069` | ❌ Tarjeta expirada |
+| `4000 0000 0000 0127` | ❌ CVC incorrecto |
+| `4000 0000 0000 0119` | ❌ Procesamiento fallido |
+| `4000 0025 0000 3155` | 🔐 Requiere autenticación (3D Secure) |
+
+**Nota sobre fallos con delay:**
+- Stripe no tiene tarjetas de prueba que fallen después de un tiempo específico
+- Los fallos ocurren inmediatamente al procesar el pago
+- Para probar fallos después de 10 segundos, usa:
+  1. Crear orden normalmente
+  2. Esperar 10 segundos
+  3. Disparar webhook manualmente: `stripe trigger payment_intent.payment_failed --override payment_intent:id=pi_xxxxx`
 
 - **Fecha de expiración**: Cualquier fecha futura (ej: 12/34)
 - **CVC**: Cualquier 3 dígitos (ej: 123)

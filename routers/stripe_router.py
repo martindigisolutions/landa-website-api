@@ -80,7 +80,8 @@ async def stripe_webhook(
     un pago fue exitoso.
     
     **Eventos soportados:**
-    - `payment_intent.succeeded`: Pago exitoso
+    - `payment_intent.succeeded`: Pago exitoso (preferido)
+    - `charge.succeeded`: Pago exitoso (alternativo)
     - `payment_intent.payment_failed`: Pago fallido
     - `charge.refunded`: Reembolso procesado
     
@@ -90,16 +91,30 @@ async def stripe_webhook(
     3. Seleccionar los eventos mencionados
     4. Configurar `STRIPE_WEBHOOK_SECRET` con el secret proporcionado
     """
+    import logging
+    logger = logging.getLogger("landa-api.stripe-webhook")
+    
     payload = await request.body()
     sig_header = request.headers.get("stripe-signature")
     
+    logger.info(f"Webhook received: {request.method} {request.url.path}")
+    logger.debug(f"Headers: {dict(request.headers)}")
+    
     if not sig_header:
+        logger.error("Missing stripe-signature header")
         raise HTTPException(status_code=400, detail="Missing stripe-signature header")
     
-    result = stripe_service.handle_webhook(
-        payload=payload,
-        sig_header=sig_header,
-        db=db
-    )
-    return result
+    try:
+        result = stripe_service.handle_webhook(
+            payload=payload,
+            sig_header=sig_header,
+            db=db
+        )
+        logger.info(f"Webhook processed successfully, returning: {result}")
+        return result
+    except Exception as e:
+        logger.error(f"Error processing webhook: {e}", exc_info=True)
+        # Return success to Stripe to prevent retries for processing errors
+        # But log the error for debugging
+        return {"status": "error", "message": str(e)}
 

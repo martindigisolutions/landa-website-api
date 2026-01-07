@@ -1,4 +1,5 @@
 import stripe
+import logging
 from sqlalchemy.orm import Session
 from fastapi import HTTPException
 from datetime import datetime
@@ -9,6 +10,9 @@ from config import STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET
 
 # Configure Stripe
 stripe.api_key = STRIPE_SECRET_KEY
+
+# Logger for webhook events
+logger = logging.getLogger("landa-api.stripe-webhook")
 
 
 def create_payment_intent(order_id: str, session_id: str, db: Session) -> dict:
@@ -157,43 +161,173 @@ def handle_webhook(payload: bytes, sig_header: str, db: Session) -> dict:
     Maneja los webhooks de Stripe para actualizar el estado de las órdenes.
     Este es el método más confiable para confirmar pagos.
     """
+    import logging
+    logger = logging.getLogger("landa-api.stripe-webhook")
+    
     try:
         event = stripe.Webhook.construct_event(
             payload, sig_header, STRIPE_WEBHOOK_SECRET
         )
+        logger.info(f"Webhook event received: {event.type} [id: {event.id}]")
     except ValueError as e:
+        logger.error(f"Invalid webhook payload: {e}")
         raise HTTPException(status_code=400, detail="Invalid payload")
     except stripe.error.SignatureVerificationError as e:
+        logger.error(f"Invalid webhook signature: {e}")
         raise HTTPException(status_code=400, detail="Invalid signature")
     
     # Manejar los eventos
     if event.type == "payment_intent.succeeded":
-        payment_intent = event.data.object
-        order_id = payment_intent.metadata.get("order_id")
-        
-        if order_id:
-            order = db.query(Order).filter(Order.id == int(order_id)).first()
+        logger.info(f"Processing payment_intent.succeeded event")
+        try:
+            payment_intent = event.data.object
+            payment_intent_id = payment_intent.id
+            
+            # Try to find order by PaymentIntent ID (most reliable)
+            logger.debug(f"Looking for order with PaymentIntent ID: {payment_intent_id}")
+            order = db.query(Order).filter(Order.stripe_payment_intent_id == payment_intent_id).first()
+            
             if order:
-                # Verificar idempotencia
-                if order.payment_status != "completed":
+                logger.info(f"Found order #{order.id} by PaymentIntent ID")
+            else:
+                logger.debug(f"Order not found by PaymentIntent ID, trying metadata...")
+            
+            # Fallback: try to find by order_id in metadata (for legacy orders)
+            if not order:
+                order_id = payment_intent.metadata.get("order_id")
+                if order_id:
+                    logger.debug(f"Trying to find order by order_id from metadata: {order_id}")
+                    try:
+                        order = db.query(Order).filter(Order.id == int(order_id)).first()
+                        if order:
+                            logger.info(f"Found order #{order.id} by order_id from metadata")
+                    except (ValueError, TypeError) as e:
+                        logger.error(f"Invalid order_id in metadata: {order_id}, error: {e}")
+            
+            # Fallback: try to find by lock_token in metadata (for new flow)
+            # Note: This only works if the order was already created (order_id would be in lock or metadata)
+            if not order:
+                lock_token = payment_intent.metadata.get("lock_token")
+                if lock_token:
+                    logger.debug(f"Trying to find order by lock_token from metadata: {lock_token}")
+                    try:
+                        from models import CartLock
+                        lock = db.query(CartLock).filter(CartLock.token == lock_token).first()
+                        if lock:
+                            # CartLock doesn't have order_id directly, but we can check if order exists
+                            # by searching for orders with this PaymentIntent ID (which should be set when order is created)
+                            # Or wait for order_id to be added to PaymentIntent metadata
+                            logger.debug(f"Found lock {lock_token}, but order may not be created yet")
+                            # The order will be created later and PaymentIntent metadata will be updated with order_id
+                            # So we'll catch it on the next webhook or when order_id is in metadata
+                        else:
+                            logger.debug(f"Lock not found for token: {lock_token}")
+                    except Exception as e:
+                        logger.error(f"Error finding order by lock_token {lock_token}: {e}")
+            
+            if order:
+                # Verificar idempotencia - solo actualizar si no está ya pagada
+                if order.status != "paid":
+                    logger.info(f"Updating order #{order.id} from {order.status} to paid")
                     order.status = "paid"
                     order.payment_status = "completed"
                     order.paid_at = datetime.utcnow()
-                    order.stripe_payment_intent_id = payment_intent.id
+                    order.stripe_payment_intent_id = payment_intent_id  # Ensure it's set
                     db.commit()
+                    logger.info(f"Order #{order.id} updated successfully: status=paid, payment_status=completed, paid_at={order.paid_at}")
                     
                     # TODO: Enviar email de confirmación
                     # await send_confirmation_email(order)
+                else:
+                    logger.info(f"Order #{order.id} already has status=paid, skipping update (idempotent)")
+            else:
+                logger.warning(f"Order not found for PaymentIntent {payment_intent_id}. Metadata: {payment_intent.metadata}")
+        except Exception as e:
+            logger.error(f"Error processing payment_intent.succeeded: {e}", exc_info=True)
+            # No re-raise - we don't want to return 500 for webhook processing errors
+            # Stripe will retry if needed
     
     elif event.type == "payment_intent.payment_failed":
         payment_intent = event.data.object
-        order_id = payment_intent.metadata.get("order_id")
+        payment_intent_id = payment_intent.id
         
-        if order_id:
-            order = db.query(Order).filter(Order.id == int(order_id)).first()
-            if order and order.payment_status != "completed":
-                order.payment_status = "failed"
-                db.commit()
+        # Try to find order by PaymentIntent ID (most reliable)
+        order = db.query(Order).filter(Order.stripe_payment_intent_id == payment_intent_id).first()
+        
+        # Fallback: try to find by order_id in metadata
+        if not order:
+            order_id = payment_intent.metadata.get("order_id")
+            if order_id:
+                order = db.query(Order).filter(Order.id == int(order_id)).first()
+        
+        # Fallback: try to find by lock_token in metadata
+        if not order:
+            lock_token = payment_intent.metadata.get("lock_token")
+            if lock_token:
+                from models import CartLock
+                lock = db.query(CartLock).filter(CartLock.token == lock_token).first()
+                if lock and lock.order_id:
+                    order = db.query(Order).filter(Order.id == lock.order_id).first()
+        
+        if order and order.status != "paid":
+            # Only update if not already paid (idempotent)
+            logger.info(f"Updating order #{order.id} to payment_failed")
+            order.status = "payment_failed"
+            order.payment_status = "failed"
+            
+            # IMPORTANT: Restore stock when payment fails
+            # Stock was deducted when order was created, so we need to return it
+            try:
+                from models import OrderItem, Product, ProductVariant
+                for order_item in order.items:
+                    if order_item.variant_id:
+                        variant = db.query(ProductVariant).filter(ProductVariant.id == order_item.variant_id).first()
+                        if variant:
+                            variant.stock = (variant.stock or 0) + order_item.quantity
+                            if variant.stock > 0:
+                                variant.is_in_stock = True
+                            logger.debug(f"Restored {order_item.quantity} units to variant {variant.id} (product: {variant.product_id})")
+                    else:
+                        product = db.query(Product).filter(Product.id == order_item.product_id).first()
+                        if product:
+                            product.stock = (product.stock or 0) + order_item.quantity
+                            if product.stock > 0:
+                                product.is_in_stock = True
+                            logger.debug(f"Restored {order_item.quantity} units to product {product.id}")
+                logger.info(f"Stock restored for order #{order.id}")
+            except Exception as e:
+                logger.error(f"Error restoring stock for order #{order.id}: {e}", exc_info=True)
+                # Continue anyway - stock restoration failure shouldn't block order status update
+            
+            db.commit()
+            logger.info(f"Order #{order.id} marked as payment_failed and stock restored")
+    
+    elif event.type == "charge.succeeded":
+        # charge.succeeded is also a valid indicator of successful payment
+        # This can arrive before or instead of payment_intent.succeeded
+        logger.info(f"Processing charge.succeeded event")
+        charge = event.data.object
+        payment_intent_id = charge.payment_intent
+        
+        if payment_intent_id:
+            # Try to find order by PaymentIntent ID
+            order = db.query(Order).filter(
+                Order.stripe_payment_intent_id == payment_intent_id
+            ).first()
+            
+            if order:
+                # Only update if not already paid (idempotent)
+                if order.status != "paid":
+                    logger.info(f"Updating order #{order.id} from {order.status} to paid via charge.succeeded")
+                    order.status = "paid"
+                    order.payment_status = "completed"
+                    order.paid_at = datetime.utcnow()
+                    db.commit()
+                    logger.info(f"Order #{order.id} updated successfully via charge.succeeded: status=paid")
+                else:
+                    logger.info(f"Order #{order.id} already has status=paid, skipping update (idempotent)")
+            else:
+                logger.warning(f"Order not found for PaymentIntent {payment_intent_id} in charge.succeeded")
     
     elif event.type == "charge.refunded":
         charge = event.data.object

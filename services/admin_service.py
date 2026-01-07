@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import secrets
 import hashlib
+import logging
 from datetime import datetime, timedelta
 from typing import Optional, List
 from fastapi import HTTPException, Depends
@@ -9,6 +10,8 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from jose import jwt, JWTError
+
+logger = logging.getLogger("landa-api.admin")
 
 from database import get_db
 from models import (
@@ -1723,8 +1726,8 @@ def update_order_status(order_id: int, data: OrderStatusUpdate, db: Session) -> 
         raise HTTPException(status_code=404, detail="Order not found")
     
     valid_statuses = [
-        "pending", "pending_payment", "pending_verification", "awaiting_verification",
-        "paid", "processing", "shipped", "delivered", "canceled", "refunded"
+        "pending", "pending_payment", "processing_payment", "pending_verification", "awaiting_verification",
+        "paid", "payment_failed", "processing", "shipped", "delivered", "canceled", "refunded"
     ]
     if data.status not in valid_statuses:
         raise HTTPException(
@@ -1732,6 +1735,7 @@ def update_order_status(order_id: int, data: OrderStatusUpdate, db: Session) -> 
             detail=f"Invalid status. Valid values: {valid_statuses}"
         )
     
+    old_status = order.status
     order.status = data.status
     
     # If marking as paid, update payment_status and paid_at
@@ -1739,6 +1743,30 @@ def update_order_status(order_id: int, data: OrderStatusUpdate, db: Session) -> 
         order.payment_status = "completed"
         if not order.paid_at:
             order.paid_at = datetime.utcnow()
+    
+    # If marking as payment_failed, restore stock and update payment_status
+    if data.status == "payment_failed":
+        order.payment_status = "failed"
+        # Restore stock that was deducted when order was created
+        try:
+            from models import OrderItem, Product, ProductVariant
+            for order_item in order.items:
+                if order_item.variant_id:
+                    variant = db.query(ProductVariant).filter(ProductVariant.id == order_item.variant_id).first()
+                    if variant:
+                        variant.stock = (variant.stock or 0) + order_item.quantity
+                        if variant.stock > 0:
+                            variant.is_in_stock = True
+                else:
+                    product = db.query(Product).filter(Product.id == order_item.product_id).first()
+                    if product:
+                        product.stock = (product.stock or 0) + order_item.quantity
+                        if product.stock > 0:
+                            product.is_in_stock = True
+            logger.info(f"Stock restored for order #{order.id} (marked as payment_failed by admin)")
+        except Exception as e:
+            logger.error(f"Error restoring stock for order #{order.id}: {e}", exc_info=True)
+            # Continue anyway - stock restoration failure shouldn't block status update
     
     db.commit()
     db.refresh(order)

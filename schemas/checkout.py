@@ -153,6 +153,7 @@ class ShipmentDetail(BaseModel):
 class OrderDetailResponse(BaseModel):
     order_id: str
     status: str
+    payment_status: Optional[str] = "pending"  # pending, processing, completed, failed, refunded
     total: float
     subtotal: float
     shipping_cost: float
@@ -161,6 +162,7 @@ class OrderDetailResponse(BaseModel):
     address: Optional[AddressDetail] = None
     shipping_method: str
     payment_method: str
+    stripe_payment_intent_id: Optional[str] = None  # Stripe PaymentIntent ID if using Stripe
     combined: bool = False  # True if order is combined with others
     combined_with: Optional[List[int]] = None  # List of order IDs in the same group
     tracking_number: Optional[str] = None  # DEPRECATED: Use shipments array instead
@@ -168,6 +170,7 @@ class OrderDetailResponse(BaseModel):
     shipped_at: Optional[datetime] = None  # DEPRECATED: Use shipments array instead
     shipments: List[ShipmentDetail] = []  # List of all shipments/packages for this order
     created_at: datetime
+    paid_at: Optional[datetime] = None  # Timestamp when payment was completed
 
 
 # === Schemas para PUT /checkout/orders/{order_id}/address ===

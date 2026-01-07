@@ -162,7 +162,7 @@ class Order(Base):
     shipping_method = Column(String)  # "pickup" o "delivery"
     payment_method = Column(String)   # "zelle", "stripe", "credit_card", etc.
     address = Column(JSON, nullable=True)  # Guardamos JSON de dirección
-    status = Column(String, default="pending")  # pending, paid, canceled, refunded, etc.
+    status = Column(String, default="pending")  # pending, processing_payment, paid, payment_failed, pending_verification, canceled, refunded, etc.
     subtotal = Column(Float, nullable=True)  # Sum of all items before taxes and shipping
     tax = Column(Float, nullable=True)  # Tax amount
     shipping_fee = Column(Float, nullable=True)  # Shipping cost
