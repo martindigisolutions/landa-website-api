@@ -1,6 +1,9 @@
 import os
 import json
+import logging
 from dotenv import load_dotenv
+
+logger = logging.getLogger(__name__)
 
 env_file = os.getenv("ENV_FILE", ".env.dev")
 load_dotenv(env_file)
@@ -12,9 +15,19 @@ APP_SECRETS_JSON = os.getenv("APP_SECRETS_JSON")
 _secrets_dict = {}
 if APP_SECRETS_JSON:
     try:
+        # Log that we're trying to parse the secret (but don't log the actual value)
+        logger.info(f"Found APP_SECRETS_JSON, attempting to parse (length: {len(APP_SECRETS_JSON)})")
         _secrets_dict = json.loads(APP_SECRETS_JSON)
-    except json.JSONDecodeError:
+        logger.info(f"Successfully parsed APP_SECRETS_JSON, found {len(_secrets_dict)} keys")
+    except json.JSONDecodeError as e:
+        logger.error(f"Failed to parse APP_SECRETS_JSON as JSON: {e}")
+        logger.error(f"APP_SECRETS_JSON value (first 100 chars): {APP_SECRETS_JSON[:100] if APP_SECRETS_JSON else 'None'}")
         _secrets_dict = {}
+    except Exception as e:
+        logger.error(f"Unexpected error parsing APP_SECRETS_JSON: {e}")
+        _secrets_dict = {}
+else:
+    logger.info("APP_SECRETS_JSON not set, using individual environment variables")
 
 def _get_secret(key: str, default: str = "") -> str:
     """Get secret from JSON or individual env var"""

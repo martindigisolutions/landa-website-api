@@ -19,6 +19,14 @@ logger = logging.getLogger("landa-api")
 print("[START] Starting Landa Beauty Supply API...")
 print(f"Python version: {sys.version}")
 print(f"DATABASE_URL set: {bool(os.getenv('DATABASE_URL'))}")
+print(f"APP_SECRETS_JSON set: {bool(os.getenv('APP_SECRETS_JSON'))}")
+if os.getenv('APP_SECRETS_JSON'):
+    app_secrets_json = os.getenv('APP_SECRETS_JSON')
+    print(f"APP_SECRETS_JSON length: {len(app_secrets_json)}")
+    print(f"APP_SECRETS_JSON starts with: {app_secrets_json[:50]}...")
+    # Check if it looks like an ARN (App Runner might be injecting the ARN instead of the value)
+    if app_secrets_json.startswith('arn:aws:'):
+        print("[WARN] APP_SECRETS_JSON looks like an ARN! App Runner might not be resolving the secret value.")
 
 try:
     from fastapi import FastAPI, Request
@@ -142,16 +150,32 @@ def init_store_settings():
 async def lifespan(app: FastAPI):
     # Startup
     try:
+        logger.info("[STARTUP] Creating database tables if needed...")
         Base.metadata.create_all(bind=engine)
-        print("[OK] Database tables created/verified")
+        logger.info("[OK] Database tables created/verified")
     except Exception as e:
-        print(f"[WARN] Could not create tables: {e}")
+        logger.error(f"[ERROR] Could not create tables: {e}")
+        logger.error(traceback.format_exc())
+        # Don't raise - let the app start anyway
     
-    init_admin_app()
-    init_store_settings()
+    try:
+        logger.info("[STARTUP] Initializing admin app...")
+        init_admin_app()
+    except Exception as e:
+        logger.error(f"[ERROR] Could not initialize admin app: {e}")
+        logger.error(traceback.format_exc())
     
+    try:
+        logger.info("[STARTUP] Initializing store settings...")
+        init_store_settings()
+    except Exception as e:
+        logger.error(f"[ERROR] Could not initialize store settings: {e}")
+        logger.error(traceback.format_exc())
+    
+    logger.info("[OK] Application startup complete")
     yield
     # Shutdown (nothing to do)
+    logger.info("[SHUTDOWN] Application shutting down")
 
 
 # Initialize app

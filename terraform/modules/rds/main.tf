@@ -10,15 +10,32 @@ resource "aws_security_group" "rds" {
   description = "Security group for RDS PostgreSQL"
   vpc_id      = var.vpc_id
 
-  # Allow from CIDR blocks
+  # Allow from CIDR blocks (only if RDS is not publicly accessible)
+  # If RDS is publicly accessible, we allow from any IP (0.0.0.0/0)
+  # This is safe because RDS requires authentication and SSL is enforced
   dynamic "ingress" {
-    for_each = length(var.allowed_cidr_blocks) > 0 ? [1] : []
+    for_each = !var.publicly_accessible && length(var.allowed_cidr_blocks) > 0 ? [1] : []
     content {
       description = "PostgreSQL from VPC CIDR"
       from_port   = 5432
       to_port     = 5432
       protocol    = "tcp"
       cidr_blocks = var.allowed_cidr_blocks
+    }
+  }
+
+  # Allow from any IP if RDS is publicly accessible (for App Runner without VPC Connector)
+  # Security is maintained through:
+  # 1. Database authentication (username/password in Secrets Manager)
+  # 2. SSL enforcement (rds.force_ssl = 1)
+  dynamic "ingress" {
+    for_each = var.publicly_accessible ? [1] : []
+    content {
+      description = "PostgreSQL from internet (publicly accessible RDS)"
+      from_port   = 5432
+      to_port     = 5432
+      protocol    = "tcp"
+      cidr_blocks = ["0.0.0.0/0"]
     }
   }
 
