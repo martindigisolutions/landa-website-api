@@ -88,7 +88,7 @@ Los siguientes secrets deben estar configurados en GitHub (Settings → Secrets 
 - `PROD_AWS_ACCOUNT_ID` = `553938786984`
 - `PROD_AWS_ACCESS_KEY_ID` = (crear usuario IAM)
 - `PROD_AWS_SECRET_ACCESS_KEY` = (crear usuario IAM)
-- `PROD_ECR_REPOSITORY` = `landa-beauty-api-api`
+- `PROD_ECR_REPOSITORY` = `landa-beauty-api`
 
 ### 2. Usuario IAM en Cuenta de Producción
 
@@ -208,8 +208,8 @@ cd "d:\Martin Digital Solutions\Landa Beauty Supply\landa-website-api"
 docker build -t landa-api .
 
 # Tag y Push
-docker tag landa-api:latest 553938786984.dkr.ecr.us-west-2.amazonaws.com/landa-beauty-api-api:latest
-docker push 553938786984.dkr.ecr.us-west-2.amazonaws.com/landa-beauty-api-api:latest
+docker tag landa-api:latest 553938786984.dkr.ecr.us-west-2.amazonaws.com/landa-beauty-api:latest
+docker push 553938786984.dkr.ecr.us-west-2.amazonaws.com/landa-beauty-api:latest
 ```
 
 **Opción B: Merge a main (si GitHub Actions ya está configurado)**
@@ -229,7 +229,7 @@ En GitHub → Settings → Secrets → Actions, agregar:
 | `PROD_AWS_ACCOUNT_ID` | `553938786984` |
 | `PROD_AWS_ACCESS_KEY_ID` | Del usuario IAM creado |
 | `PROD_AWS_SECRET_ACCESS_KEY` | Del usuario IAM creado |
-| `PROD_ECR_REPOSITORY` | `landa-beauty-api-api` |
+| `PROD_ECR_REPOSITORY` | `landa-beauty-api` |
 
 ### Paso 8: Verificar despliegue
 

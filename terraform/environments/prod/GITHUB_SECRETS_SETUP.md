@@ -22,7 +22,7 @@ Ve a tu repositorio en GitHub y configura los siguientes secrets:
 | `PROD_AWS_ACCOUNT_ID` | `553938786984` |
 | `PROD_AWS_ACCESS_KEY_ID` | `[OBTENER DEL COMANDO AWS CLI]` |
 | `PROD_AWS_SECRET_ACCESS_KEY` | `[OBTENER DEL COMANDO AWS CLI]` |
-| `PROD_ECR_REPOSITORY` | `landa-beauty-api-api` |
+| `PROD_ECR_REPOSITORY` | `landa-beauty-api` |
 
 ⚠️ **Las credenciales reales NO deben estar en este archivo por seguridad.**
 Para obtenerlas, ejecuta: `aws iam list-access-keys --user-name github-actions-ecr`
@@ -54,7 +54,7 @@ Para obtenerlas, ejecuta: `aws iam list-access-keys --user-name github-actions-e
 
    **Secret 4:**
    - Name: `PROD_ECR_REPOSITORY`
-   - Secret: `landa-beauty-api-api`
+   - Secret: `landa-beauty-api`
 
 4. **Verifica que todos los secrets estén configurados:**
    - Deberías ver 4 secrets con el prefijo `PROD_`

@@ -24,7 +24,7 @@ terraform/
 | Ambiente | AWS Account | Rama Git | ECR Repository |
 |----------|-------------|----------|----------------|
 | Dev | 775681068353 | `dev` | landa-beauty-api-dev-api |
-| Prod | 553938786984 | `main` | landa-beauty-api-api |
+| Prod | 553938786984 | `main` | landa-beauty-api |
 
 ## 🚀 Despliegue Inicial
 
@@ -98,7 +98,7 @@ Ve a: GitHub → Settings → Secrets and variables → Actions → New reposito
 | `PROD_AWS_ACCOUNT_ID` | `553938786984` |
 | `PROD_AWS_ACCESS_KEY_ID` | Tu access key de prod |
 | `PROD_AWS_SECRET_ACCESS_KEY` | Tu secret key de prod |
-| `PROD_ECR_REPOSITORY` | `landa-beauty-api-api` |
+| `PROD_ECR_REPOSITORY` | `landa-beauty-api` |
 
 ### Crear IAM User para GitHub Actions
 

@@ -7,7 +7,7 @@
 # ECR Repository
 # ============================================
 resource "aws_ecr_repository" "api" {
-  name                 = "${var.project_name}-api"
+  name                 = var.project_name
   image_tag_mutability = "MUTABLE"
   force_delete         = true
 
@@ -128,7 +128,7 @@ resource "aws_iam_role_policy" "apprunner_secrets" {
 # App Runner Service (desde ECR)
 # ============================================
 resource "aws_apprunner_service" "api" {
-  service_name = "${var.project_name}-api"
+  service_name = var.project_name
 
   source_configuration {
     authentication_configuration {

@@ -402,7 +402,7 @@ aws iam get-role-policy \
 
 ```bash
 # Ver logs
-aws logs tail /aws/apprunner/landa-beauty-api-api --follow
+aws logs tail /aws/apprunner/landa-beauty-api --follow
 ```
 
 ---
