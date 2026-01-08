@@ -570,6 +570,35 @@ def list_users(
     return admin_service.list_users(db, search, user_type, registration_complete, page, page_size)
 
 
+# ==================== USER ACTIVITY TRACKING ====================
+# NOTE: This endpoint must come BEFORE /users/{user_id} to avoid route conflicts
+
+@router.get(
+    "/users/by-activity",
+    response_model=dict,  # Using dict because schema is complex
+    summary="Get users ordered by last activity",
+    description="""Get a paginated list of users ordered by their most recent activity.
+    
+    Useful for seeing which users are most active. Users without any activities
+    will appear at the end sorted by creation date.
+    """
+)
+def get_users_by_activity(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    search: Optional[str] = Query(None, description="Search by email, phone, or name"),
+    app=Depends(admin_service.require_scope("users:read")),
+    db: Session = Depends(get_db)
+):
+    from services import activity_service
+    return activity_service.get_users_by_last_activity(
+        db=db,
+        page=page,
+        page_size=page_size,
+        search=search
+    )
+
+
 @router.get(
     "/users/{user_id}",
     response_model=UserAdminResponse,
@@ -1068,3 +1097,190 @@ def seed_default_settings(
         "updated_count": created_count
     }
 
+
+# ==================== USER ACTIVITY TRACKING (continued) ====================
+
+@router.get(
+    "/users/{user_id}/activities",
+    response_model=dict,  # Using dict because schema is complex
+    summary="Get user activities",
+    description="""Get all activities for a specific user with pagination.
+    
+    You can filter by action_type (e.g., "view_products", "add_to_cart", "checkout")
+    and date range.
+    """
+)
+def get_user_activities(
+    user_id: int,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=100),
+    action_type: Optional[str] = Query(None, description="Filter by action type"),
+    start_date: Optional[str] = Query(None, description="Start date (ISO format)"),
+    end_date: Optional[str] = Query(None, description="End date (ISO format)"),
+    app=Depends(admin_service.require_scope("users:read")),
+    db: Session = Depends(get_db)
+):
+    from services import activity_service
+    from datetime import datetime
+    from fastapi import HTTPException
+    
+    # Parse dates if provided
+    start_dt = None
+    end_dt = None
+    
+    if start_date:
+        try:
+            start_dt = datetime.fromisoformat(start_date.replace('Z', '+00:00'))
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid start_date format. Use ISO format.")
+    
+    if end_date:
+        try:
+            end_dt = datetime.fromisoformat(end_date.replace('Z', '+00:00'))
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid end_date format. Use ISO format.")
+    
+    return activity_service.get_user_activities(
+        db=db,
+        user_id=user_id,
+        page=page,
+        page_size=page_size,
+        action_type=action_type,
+        start_date=start_dt,
+        end_date=end_dt
+    )
+
+
+@router.get(
+    "/users/{user_id}/carts",
+    response_model=List[dict],  # Using dict because schema is complex
+    summary="Get user carts",
+    description="""Get all carts for a specific user.
+    
+    Returns all carts (current and historical) with their items and totals.
+    """
+)
+def get_user_carts(
+    user_id: int,
+    include_inactive: bool = Query(False, description="Include inactive/empty carts"),
+    app=Depends(admin_service.require_scope("users:read")),
+    db: Session = Depends(get_db)
+):
+    from services import activity_service
+    return activity_service.get_user_carts(
+        db=db,
+        user_id=user_id,
+        include_inactive=include_inactive
+    )
+
+
+@router.get(
+    "/carts",
+    response_model=dict,  # Using dict because schema is complex
+    summary="Get all carts",
+    description="""Get all carts with pagination (admin view).
+    
+    Useful for monitoring all active carts in the system.
+    
+    Sort options:
+    - "updated_at" (default): Order by last update date (most recent first)
+    - "created_at": Order by creation date (most recent first)
+    - "user_email": Order alphabetically by user email
+    - "user_name": Order alphabetically by user name
+    """
+)
+def get_all_carts(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    user_id: Optional[int] = Query(None, description="Filter by user ID"),
+    has_items: Optional[bool] = Query(None, description="Filter carts with/without items"),
+    sort_by: str = Query("updated_at", description="Sort by: updated_at, created_at, user_email, user_name"),
+    app=Depends(admin_service.require_scope("orders:read")),
+    db: Session = Depends(get_db)
+):
+    from services import activity_service
+    return activity_service.get_all_carts(
+        db=db,
+        page=page,
+        page_size=page_size,
+        user_id=user_id,
+        has_items=has_items,
+        sort_by=sort_by
+    )
+
+
+@router.get(
+    "/carts/{cart_id}",
+    response_model=dict,  # Using dict because schema is complex
+    summary="Get cart details",
+    description="""Get detailed information about a specific cart including all items.
+    """
+)
+def get_cart_details(
+    cart_id: int,
+    app=Depends(admin_service.require_scope("orders:read")),
+    db: Session = Depends(get_db)
+):
+    from services import activity_service
+    from models import Cart
+    from fastapi import HTTPException
+    
+    cart = db.query(Cart).filter(Cart.id == cart_id).first()
+    if not cart:
+        raise HTTPException(status_code=404, detail="Cart not found")
+    
+    carts = activity_service.get_user_carts(
+        db=db,
+        user_id=cart.user_id,
+        session_id=cart.session_id,
+        include_inactive=True
+    )
+    
+    # Find the specific cart
+    for cart_data in carts:
+        if cart_data["id"] == cart_id:
+            return cart_data
+    
+    raise HTTPException(status_code=404, detail="Cart not found")
+
+
+@router.get(
+    "/activities/stats",
+    response_model=dict,
+    summary="Get activity statistics",
+    description="""Get statistics about user activities in the database.
+    
+    Useful for monitoring and understanding usage patterns.
+    """
+)
+def get_activity_stats(
+    app=Depends(admin_service.require_scope("users:read")),
+    db: Session = Depends(get_db)
+):
+    from services import activity_service
+    return activity_service.get_activity_stats(db)
+
+
+@router.post(
+    "/activities/cleanup",
+    response_model=dict,
+    summary="Cleanup old activities",
+    description="""Delete old activities from the database.
+    
+    **IMPORTANT:** This operation cannot be undone. Use `dry_run=true` first to see what would be deleted.
+    
+    **Recommended:** Run cleanup monthly to keep the table size manageable.
+    """
+)
+def cleanup_activities(
+    older_than_days: int = Query(90, ge=1, description="Delete activities older than this many days"),
+    dry_run: bool = Query(True, description="If true, only return counts without deleting"),
+    app=Depends(admin_service.require_scope("users:write")),
+    db: Session = Depends(get_db)
+):
+    from services import activity_service
+    return activity_service.cleanup_old_activities(
+        db=db,
+        older_than_days=older_than_days,
+        dry_run=dry_run
+    )

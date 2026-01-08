@@ -978,3 +978,82 @@ class CombinedOrdersResponse(BaseModel):
     combined_group_id: str
     orders: List[OrderAdminResponse]
     shared_shipments: List[OrderShipmentResponse]
+
+
+# ---------- User Activity Tracking Schemas ----------
+
+class ActivityResponse(BaseModel):
+    """Single activity record"""
+    id: int
+    method: str
+    endpoint: str
+    action_type: str
+    metadata: dict = {}
+    query_params: dict = {}
+    response_status: Optional[int] = None
+    ip_address: Optional[str] = None
+    created_at: str
+
+
+class UserActivitySummary(BaseModel):
+    """User info with last activity and total activities count"""
+    user: UserAdminResponse
+    last_activity_at: Optional[str] = None
+    total_activities: int
+
+
+class PaginatedUserActivitiesResponse(BaseModel):
+    """Paginated response for user activities"""
+    results: List[ActivityResponse]
+    pagination: dict
+
+
+class UsersByActivityResponse(BaseModel):
+    """Response for users ordered by last activity"""
+    results: List[UserActivitySummary]
+    pagination: dict
+
+
+class CartItemActivityResponse(BaseModel):
+    """Cart item in activity response"""
+    id: int
+    product_id: int
+    product_name: Optional[str] = None
+    variant_id: Optional[int] = None
+    variant_name: Optional[str] = None
+    quantity: int
+    unit_price: float
+    line_total: float
+    added_at: Optional[str] = None
+
+
+class CartActivityResponse(BaseModel):
+    """Cart details in activity response"""
+    id: int
+    user_id: Optional[int] = None
+    session_id: Optional[str] = None
+    items: List[CartItemActivityResponse] = []
+    summary: dict
+    shipping: dict
+    payment_method: Optional[str] = None
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
+
+class CartListItemResponse(BaseModel):
+    """Cart summary for listing"""
+    id: int
+    user_id: Optional[int] = None
+    session_id: Optional[str] = None
+    user: Optional[dict] = None
+    items_count: int
+    payment_method: Optional[str] = None
+    is_pickup: bool = False
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
+
+class PaginatedCartsResponse(BaseModel):
+    """Paginated response for carts"""
+    results: List[CartListItemResponse]
+    pagination: dict

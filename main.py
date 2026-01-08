@@ -238,6 +238,15 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Activity tracking middleware (must be after CORS)
+try:
+    from middleware.activity_middleware import ActivityTrackingMiddleware
+    app.add_middleware(ActivityTrackingMiddleware)
+    print("[OK] Activity tracking middleware enabled")
+except Exception as e:
+    print(f"[WARN] Could not enable activity tracking middleware: {e}")
+    logger.warning(f"Activity tracking middleware not available: {e}")
+
 # Include routers
 app.include_router(auth.router)
 app.include_router(products.router)

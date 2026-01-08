@@ -555,3 +555,49 @@ class StockReservation(Base):
     lock = relationship("CartLock", back_populates="reservations")
     product = relationship("Product")
     variant = relationship("ProductVariant")
+
+
+# ==================== USER ACTIVITY TRACKING ====================
+
+class UserActivity(Base):
+    """
+    Tracks all user actions/interactions with the API.
+    Captures endpoint calls, search queries, cart actions, checkout steps, etc.
+    """
+    __tablename__ = "user_activities"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    
+    # User identification (nullable for guest users identified only by session_id)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    session_id = Column(String, nullable=True, index=True)  # For guest users
+    
+    # Request information
+    method = Column(String, nullable=False)  # GET, POST, PUT, PATCH, DELETE
+    endpoint = Column(String, nullable=False, index=True)  # e.g., "/products", "/cart/add"
+    action_type = Column(String, nullable=False, index=True)  # e.g., "view_products", "search", "add_to_cart", "checkout", "payment"
+    
+    # Request metadata (stored as JSON for flexibility)
+    activity_metadata = Column("metadata", JSON, default=dict)  # Search terms, filters, product IDs, quantities, etc.
+    
+    # Request context
+    query_params = Column(JSON, default=dict)  # Query parameters (e.g., search, filters, pagination)
+    request_body = Column(JSON, nullable=True)  # Request body for POST/PUT/PATCH (sanitized)
+    response_status = Column(Integer, nullable=True)  # HTTP status code
+    
+    # Client information
+    ip_address = Column(String, nullable=True)
+    user_agent = Column(String, nullable=True)
+    
+    # Timestamp
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+    
+    # Relationships
+    user = relationship("User", backref="activities")
+    
+    # Indexes for common queries
+    __table_args__ = (
+        Index('ix_user_activities_user_created', 'user_id', 'created_at'),
+        Index('ix_user_activities_session_created', 'session_id', 'created_at'),
+        Index('ix_user_activities_action_created', 'action_type', 'created_at'),
+    )
