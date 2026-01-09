@@ -1778,7 +1778,25 @@ def update_order_status(order_id: int, data: OrderStatusUpdate, db: Session) -> 
 
 
 def create_order_shipment(order_id: int, data: OrderShipmentCreate, db: Session) -> OrderShipmentResponse:
-    """Create a new shipment/package for an order. If order is combined, creates for all orders in group."""
+    """
+    Create a shipment/package for an order. 
+    
+    **Behavior:**
+    - Deletes ALL existing shipments for this order first, then creates a new one.
+    - This ensures that marking an order as 'ready for shipping' always creates a fresh shipment.
+    - If order is combined, deletes and recreates shipments for all orders in the combined group.
+    
+    **Timezone:** All datetime fields are stored in UTC. If shipped_at is not provided but tracking_number exists,
+    it will be automatically set to the current UTC time (datetime.utcnow()).
+    
+    Args:
+        order_id: Order ID
+        data: Shipment data (tracking_number is required)
+        db: Database session
+    
+    Returns:
+        OrderShipmentResponse with shipment details
+    """
     order = db.query(Order).filter(Order.id == order_id).first()
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
@@ -1792,13 +1810,18 @@ def create_order_shipment(order_id: int, data: OrderShipmentCreate, db: Session)
         order_ids_in_group = [co.order_id for co in combined_orders]
         orders_to_update = db.query(Order).filter(Order.id.in_(order_ids_in_group)).all()
     
-    # Create shipment for the primary order
+    # Delete ALL existing shipments for all orders in the group
+    for o in orders_to_update:
+        for existing_shipment in o.shipments:
+            db.delete(existing_shipment)
+    
+    # Create new shipment for the primary order
     shipment = OrderShipment(
         order_id=order_id,
         tracking_number=data.tracking_number,
         tracking_url=data.tracking_url,
         carrier=data.carrier,
-        shipped_at=data.shipped_at or datetime.utcnow(),
+        shipped_at=data.shipped_at or (datetime.utcnow() if data.tracking_number else None),
         estimated_delivery=data.estimated_delivery,
         notes=data.notes,
         combined_group_id=order.combined_group_id  # Link to combined group if exists
@@ -1814,7 +1837,7 @@ def create_order_shipment(order_id: int, data: OrderShipmentCreate, db: Session)
                     tracking_number=data.tracking_number,
                     tracking_url=data.tracking_url,
                     carrier=data.carrier,
-                    shipped_at=data.shipped_at or datetime.utcnow(),
+                    shipped_at=data.shipped_at or (datetime.utcnow() if data.tracking_number else None),
                     estimated_delivery=data.estimated_delivery,
                     notes=data.notes,
                     combined_group_id=order.combined_group_id
@@ -1854,15 +1877,20 @@ def create_order_shipment(order_id: int, data: OrderShipmentCreate, db: Session)
 
 
 def create_order_shipments_bulk(order_id: int, data: OrderShipmentBulkCreate, db: Session) -> List[OrderShipmentResponse]:
-    """Create multiple shipments/packages for an order in a single request"""
+    """
+    Create multiple shipments/packages for an order in a single request.
+    
+    **Behavior:**
+    - Deletes ALL existing shipments for this order first, then creates new ones.
+    - This ensures that marking an order as 'ready for shipping' always creates fresh shipments.
+    - If order is combined, deletes and recreates shipments for all orders in the combined group.
+    """
     order = db.query(Order).filter(Order.id == order_id).first()
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
     
     if not data.shipments:
         raise HTTPException(status_code=400, detail="At least one shipment is required")
-    
-    created_shipments = []
     
     # Get all orders in the combined group if this order is combined
     orders_to_update = [order]
@@ -1872,6 +1900,13 @@ def create_order_shipments_bulk(order_id: int, data: OrderShipmentBulkCreate, db
         ).all()
         order_ids_in_group = [co.order_id for co in combined_orders]
         orders_to_update = db.query(Order).filter(Order.id.in_(order_ids_in_group)).all()
+    
+    # Delete ALL existing shipments for all orders in the group
+    for o in orders_to_update:
+        for existing_shipment in o.shipments:
+            db.delete(existing_shipment)
+    
+    created_shipments = []
     
     for shipment_data in data.shipments:
         # Create shipment for primary order

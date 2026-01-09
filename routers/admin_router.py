@@ -446,8 +446,15 @@ def update_order_status(
 @router.post(
     "/orders/{order_id}/shipments",
     response_model=OrderShipmentResponse,
-    summary="Create single shipment for order",
-    description="Create a new shipment/package for an order with tracking information. An order can have multiple shipments."
+    summary="Create shipment for order (replaces all existing)",
+    description="""Create a new shipment/package for an order with tracking information.
+    
+    **Important:** This endpoint will DELETE all existing shipments for the order first, then create a new one.
+    Each call completely replaces any previous shipments. This ensures clean data when marking an order as 'ready for shipping'.
+    
+    **Timezone:** All datetime fields (shipped_at, estimated_delivery) should be sent in UTC format (ISO 8601 with Z suffix).
+    If not provided, shipped_at will be automatically set to the current UTC time when tracking_number is provided.
+    """
 )
 def create_order_shipment(
     order_id: int,

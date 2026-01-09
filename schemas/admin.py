@@ -487,17 +487,26 @@ class RecipientAddress(BaseModel):
 
 
 class OrderShipmentResponse(BaseModel):
+    """
+    Shipment response with datetime fields.
+    
+    **Important:** All datetime fields (shipped_at, estimated_delivery, delivered_at, created_at, updated_at) 
+    are returned in UTC timezone as ISO 8601 strings (e.g., "2026-01-09T18:26:00Z").
+    
+    The frontend MUST convert these UTC timestamps to the user's local timezone for display.
+    Example: If shipped_at is "2026-01-09T18:26:00Z" and user is in UTC-7, display as "09 ene 2026, 11:26".
+    """
     id: int
     order_id: int
     tracking_number: str
     tracking_url: Optional[str] = None
     carrier: Optional[str] = None
-    shipped_at: Optional[datetime] = None
-    estimated_delivery: Optional[datetime] = None
-    delivered_at: Optional[datetime] = None
+    shipped_at: Optional[datetime] = None  # UTC datetime - frontend must convert to local time
+    estimated_delivery: Optional[datetime] = None  # UTC datetime - frontend must convert to local time
+    delivered_at: Optional[datetime] = None  # UTC datetime - frontend must convert to local time
     notes: Optional[str] = None
-    created_at: datetime
-    updated_at: datetime
+    created_at: datetime  # UTC datetime - frontend must convert to local time
+    updated_at: datetime  # UTC datetime - frontend must convert to local time
     shared_with_orders: Optional[List[int]] = None  # List of order IDs sharing this shipment
 
     class Config:
@@ -505,11 +514,19 @@ class OrderShipmentResponse(BaseModel):
 
 
 class OrderShipmentCreate(BaseModel):
+    """
+    Create or update a shipment for an order.
+    
+    Note: If order already has pending shipments (without shipped_at), they will be updated instead of creating new ones.
+    
+    Timezone: All datetime fields should be in UTC (ISO 8601 format with Z suffix, e.g., "2024-01-20T15:30:00Z").
+    If shipped_at is not provided, it will be auto-set to current UTC time when tracking_number is provided.
+    """
     tracking_number: str
     tracking_url: Optional[str] = None
     carrier: Optional[str] = None
-    shipped_at: Optional[datetime] = None
-    estimated_delivery: Optional[datetime] = None
+    shipped_at: Optional[datetime] = None  # UTC datetime - auto-set if not provided and tracking_number exists
+    estimated_delivery: Optional[datetime] = None  # UTC datetime
     notes: Optional[str] = None
 
 
