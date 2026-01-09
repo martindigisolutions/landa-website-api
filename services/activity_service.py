@@ -2,7 +2,7 @@
 Service for tracking and querying user activities.
 """
 from sqlalchemy.orm import Session
-from sqlalchemy import func, desc, or_, and_
+from sqlalchemy import func, desc, or_, and_, nullslast
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 from models import UserActivity, User, Cart, CartItem
@@ -114,8 +114,10 @@ def get_users_by_last_activity(
         )
     
     # Order by last activity (most recent first), then by user creation date
+    # Use nullslast() to ensure users without activity appear at the end
+    # This handles PostgreSQL vs SQLite differences in NULL sorting
     query = query.order_by(
-        desc(last_activity_subquery.c.last_activity_at),
+        nullslast(desc(last_activity_subquery.c.last_activity_at)),
         desc(User.created_at)
     )
     
