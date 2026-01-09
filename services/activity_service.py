@@ -194,16 +194,29 @@ def get_user_activities(
     page_size: int = 50,
     action_type: Optional[str] = None,
     start_date: Optional[datetime] = None,
-    end_date: Optional[datetime] = None
+    end_date: Optional[datetime] = None,
+    exclude_admin: bool = False
 ) -> Dict[str, Any]:
     """
     Get all activities for a specific user with pagination and optional filters.
+    
+    Args:
+        exclude_admin: If True, excludes admin activities (endpoints starting with /admin)
     """
     query = db.query(UserActivity).filter(UserActivity.user_id == user_id)
     
     # Apply filters
     if action_type:
         query = query.filter(UserActivity.action_type == action_type)
+    
+    # Exclude admin activities if requested
+    if exclude_admin:
+        query = query.filter(
+            ~UserActivity.endpoint.startswith('/admin'),
+            ~UserActivity.endpoint.startswith('/oauth'),  # Exclude OAuth endpoints (admin/internal use)
+            ~UserActivity.action_type.startswith('admin_'),
+            ~UserActivity.action_type.contains('oauth')  # Exclude oauth action types
+        )
     
     if start_date:
         query = query.filter(UserActivity.created_at >= start_date)
@@ -224,12 +237,129 @@ def get_user_activities(
     # Build response
     results = []
     for activity in activities:
+        metadata = activity.activity_metadata or {}
+        
+        # Extract app info from metadata if present
+        app_info = None
+        if "app_name" in metadata:
+            app_info = {
+                "name": metadata.get("app_name"),
+                "client_id": metadata.get("app_client_id")
+            }
+        
         results.append({
             "id": activity.id,
+            "user_id": activity.user_id,  # Always include user_id (null for app calls)
+            "app": app_info,  # App info if it's an OAuth2 app call (null for user calls)
             "method": activity.method,
             "endpoint": activity.endpoint,
             "action_type": activity.action_type,
-            "metadata": activity.activity_metadata or {},
+            "metadata": metadata,
+            "query_params": activity.query_params or {},
+            "response_status": activity.response_status,
+            "ip_address": activity.ip_address,
+            "created_at": activity.created_at.isoformat() if activity.created_at else None
+        })
+    
+    return {
+        "results": results,
+        "pagination": {
+            "page": page,
+            "page_size": page_size,
+            "total_items": total_items,
+            "total_pages": total_pages
+        }
+    }
+
+
+def get_all_activities(
+    db: Session,
+    page: int = 1,
+    page_size: int = 50,
+    user_id: Optional[int] = None,
+    action_type: Optional[str] = None,
+    start_date: Optional[datetime] = None,
+    end_date: Optional[datetime] = None,
+    exclude_admin: bool = False
+) -> Dict[str, Any]:
+    """
+    Get all activities from all users with pagination and optional filters.
+    Similar to get_user_activities but for all users (or filtered by user_id if provided).
+    
+    Args:
+        exclude_admin: If True, excludes admin activities (endpoints starting with /admin)
+    """
+    query = db.query(UserActivity)
+    
+    # Apply filters
+    if user_id:
+        query = query.filter(UserActivity.user_id == user_id)
+    
+    if action_type:
+        query = query.filter(UserActivity.action_type == action_type)
+    
+    # Exclude admin activities if requested
+    if exclude_admin:
+        query = query.filter(
+            ~UserActivity.endpoint.startswith('/admin'),
+            ~UserActivity.endpoint.startswith('/oauth'),  # Exclude OAuth endpoints (admin/internal use)
+            ~UserActivity.action_type.startswith('admin_'),
+            ~UserActivity.action_type.contains('oauth')  # Exclude oauth action types
+        )
+    
+    if start_date:
+        query = query.filter(UserActivity.created_at >= start_date)
+    
+    if end_date:
+        query = query.filter(UserActivity.created_at <= end_date)
+    
+    # Get total count
+    total_items = query.count()
+    total_pages = (total_items + page_size - 1) // page_size
+    
+    # Order by most recent first
+    query = query.order_by(desc(UserActivity.created_at))
+    
+    # Join with User table to include user info
+    from sqlalchemy.orm import joinedload
+    query = query.options(joinedload(UserActivity.user))
+    
+    # Apply pagination
+    activities = query.offset((page - 1) * page_size).limit(page_size).all()
+    
+    # Build response with user info included
+    results = []
+    for activity in activities:
+        user_info = None
+        if activity.user_id and activity.user:
+            user_info = {
+                "id": activity.user.id,
+                "email": activity.user.email,
+                "phone": activity.user.phone,
+                "first_name": activity.user.first_name,
+                "last_name": activity.user.last_name
+            }
+        
+        metadata = activity.activity_metadata or {}
+        
+        # Extract app info from metadata if present
+        app_info = None
+        if "app_name" in metadata:
+            app_info = {
+                "name": metadata.get("app_name"),
+                "client_id": metadata.get("app_client_id")
+            }
+        
+        results.append({
+            "id": activity.id,
+            "user_id": activity.user_id,
+            "user": user_info,  # Include user info for admin view
+            "app": app_info,  # Include app info if it's an app call
+            "session_id": activity.session_id,
+            "method": activity.method,
+            "endpoint": activity.endpoint,
+            "action_type": activity.action_type,
+            "metadata": metadata,
             "query_params": activity.query_params or {},
             "response_status": activity.response_status,
             "ip_address": activity.ip_address,

@@ -340,11 +340,12 @@ class ActivityTrackingMiddleware(BaseHTTPMiddleware):
         if path in ["/api/health", "/docs", "/openapi.json", "/redoc"]:
             return await call_next(request)
         
-        # Get user from token if available
+        # Get user or app from token if available
         user_id = None
         session_id = None
+        app_info = None  # Will contain app_name and app_client_id if it's an app token
         
-        # Try to get user from Authorization header
+        # Try to get user/app from Authorization header
         auth_header = request.headers.get("Authorization")
         if auth_header and auth_header.startswith("Bearer "):
             try:
@@ -354,26 +355,42 @@ class ActivityTrackingMiddleware(BaseHTTPMiddleware):
                 token = auth_header.split(" ")[1]
                 payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
                 identifier = payload.get("sub")
+                token_type = payload.get("type")  # "app" or None (user)
                 
                 if identifier:
-                    # Get user ID from database
                     db = SessionLocal()
                     try:
-                        from models import User
-                        from sqlalchemy import or_
-                        user = db.query(User).filter(
-                            or_(
-                                User.email == identifier,
-                                User.phone == identifier,
-                                User.whatsapp_phone == identifier
-                            )
-                        ).first()
-                        if user:
-                            user_id = user.id
+                        # Check if it's an application token
+                        if token_type == "app":
+                            # It's an OAuth2 application
+                            from models import Application
+                            app = db.query(Application).filter(
+                                Application.client_id == identifier,
+                                Application.is_active == True
+                            ).first()
+                            if app:
+                                app_info = {
+                                    "app_name": app.name,
+                                    "app_client_id": app.client_id
+                                }
+                                logger.debug(f"Detected app token: {app.name} ({app.client_id})")
+                        else:
+                            # It's a user token
+                            from models import User
+                            from sqlalchemy import or_
+                            user = db.query(User).filter(
+                                or_(
+                                    User.email == identifier,
+                                    User.phone == identifier,
+                                    User.whatsapp_phone == identifier
+                                )
+                            ).first()
+                            if user:
+                                user_id = user.id
                     finally:
                         db.close()
             except (JWTError, Exception) as e:
-                # Invalid token or error - continue without user_id
+                # Invalid token or error - continue without user_id/app_info
                 pass
         
         # Get session ID from header
@@ -381,6 +398,14 @@ class ActivityTrackingMiddleware(BaseHTTPMiddleware):
         
         # Extract request data
         request_data = await extract_request_data(request, path)
+        
+        # Add app info to metadata if it's an application call
+        if app_info:
+            if "metadata" not in request_data:
+                request_data["metadata"] = {}
+            request_data["metadata"]["app_name"] = app_info["app_name"]
+            request_data["metadata"]["app_client_id"] = app_info["app_client_id"]
+            logger.debug(f"Added app info to metadata: {app_info['app_name']}")
         
         # Determine action type
         action_type = get_action_type(request.method, path)

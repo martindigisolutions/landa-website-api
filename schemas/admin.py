@@ -982,9 +982,17 @@ class CombinedOrdersResponse(BaseModel):
 
 # ---------- User Activity Tracking Schemas ----------
 
+class AppInfo(BaseModel):
+    """Information about OAuth2 application that performed the action"""
+    name: str
+    client_id: str
+
+
 class ActivityResponse(BaseModel):
     """Single activity record"""
     id: int
+    user_id: Optional[int] = None  # null for app calls or guest users
+    app: Optional[AppInfo] = None  # App info if it's an OAuth2 app call, null for user calls
     method: str
     endpoint: str
     action_type: str

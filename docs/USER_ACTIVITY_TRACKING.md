@@ -26,6 +26,8 @@ Todos los endpoints requieren autenticación OAuth2 con el scope apropiado:
 Authorization: Bearer YOUR_ACCESS_TOKEN
 ```
 
+**Nota:** Las actividades de aplicaciones OAuth2 (como el dashboard admin) se identifican por el campo `app` en la respuesta. Cuando `user_id` es `null` pero `app` tiene información, significa que la acción fue realizada por una aplicación, no por un usuario final.
+
 ---
 
 ## 📊 Endpoints Disponibles
@@ -126,6 +128,8 @@ Authorization: Bearer YOUR_TOKEN
   "results": [
     {
       "id": 1234,
+      "user_id": 1,
+      "app": null,
       "method": "GET",
       "endpoint": "/products",
       "action_type": "search_products",
@@ -150,23 +154,44 @@ Authorization: Bearer YOUR_TOKEN
     },
     {
       "id": 1233,
+      "user_id": 1,
+      "app": null,
       "method": "POST",
       "endpoint": "/cart/add",
       "action_type": "add_to_cart",
       "metadata": {
         "product_id": 42,
+        "product_sku": "TINTE-RUBIO-500ML",
         "variant_id": 15,
+        "variant_sku": "TINTE-RUBIO-500ML-VOL10",
         "quantity": 2
       },
       "query_params": {},
-      "request_body": {
-        "product_id": 42,
-        "variant_id": 15,
-        "quantity": 2
-      },
       "response_status": 200,
       "ip_address": "192.168.1.1",
       "created_at": "2024-01-20T15:43:15"
+    },
+    {
+      "id": 2000,
+      "user_id": null,
+      "app": {
+        "name": "Super Admin Dashboard",
+        "client_id": "app_landa_admin"
+      },
+      "method": "GET",
+      "endpoint": "/admin/activities",
+      "action_type": "admin_get_admin_activities",
+      "metadata": {
+        "app_name": "Super Admin Dashboard",
+        "app_client_id": "app_landa_admin"
+      },
+      "query_params": {
+        "page": "1",
+        "page_size": "50"
+      },
+      "response_status": 200,
+      "ip_address": "127.0.0.1",
+      "created_at": "2024-01-20T16:00:00"
     }
   ],
   "pagination": {
@@ -177,6 +202,11 @@ Authorization: Bearer YOUR_TOKEN
   }
 }
 ```
+
+**Nota Importante sobre `user_id` y `app`:**
+- Si `user_id` tiene valor y `app` es `null`: Es una actividad de un usuario
+- Si `user_id` es `null` y `app` tiene valor: Es una actividad de una aplicación OAuth2 (admin dashboard, etc.)
+- Si ambos son `null`: Es una actividad de un usuario guest (sin autenticar)
 
 **Casos de Uso:**
 - Analizar el comportamiento de un usuario específico
@@ -393,6 +423,130 @@ Authorization: Bearer YOUR_TOKEN
 - Ver detalle completo de un carrito específico
 - Analizar contenido de carritos abandonados
 - Verificar información de envío guardada
+
+---
+
+### 6. Ver Todas las Actividades
+
+Obtiene todas las actividades de todos los usuarios con paginación y filtros opcionales.
+
+**Endpoint:** `GET /admin/activities`
+
+**Query Parameters:**
+- `page` (opcional, default: 1) - Número de página
+- `page_size` (opcional, default: 50, máximo: 100) - Elementos por página
+- `user_id` (opcional) - Filtrar por usuario específico
+- `action_type` (opcional) - Filtrar por tipo de acción (ej: "search_products", "add_to_cart")
+- `start_date` (opcional) - Fecha de inicio en formato ISO (ej: "2024-01-15T00:00:00")
+- `end_date` (opcional) - Fecha de fin en formato ISO (ej: "2024-01-20T23:59:59")
+- `exclude_admin` (opcional, default: false) - Si es `true`, excluye actividades de admin y OAuth
+
+**Ejemplo de Request:**
+```http
+GET /admin/activities?page=1&page_size=50&action_type=add_to_cart&exclude_admin=true
+Authorization: Bearer YOUR_TOKEN
+```
+
+**Ejemplo de Response:**
+```json
+{
+  "results": [
+    {
+      "id": 1234,
+      "user_id": 1,
+      "user": {
+        "id": 1,
+        "email": "juan@example.com",
+        "first_name": "Juan",
+        "last_name": "Pérez"
+      },
+      "app": null,
+      "session_id": "abc123",
+      "method": "POST",
+      "endpoint": "/cart/add",
+      "action_type": "add_to_cart",
+      "metadata": {
+        "product_id": 42,
+        "product_sku": "TINTE-RUBIO-500ML",
+        "variant_id": 15,
+        "variant_sku": "TINTE-RUBIO-500ML-VOL10",
+        "quantity": 2
+      },
+      "query_params": {},
+      "response_status": 200,
+      "ip_address": "192.168.1.1",
+      "created_at": "2024-01-20T15:43:15"
+    },
+    {
+      "id": 2000,
+      "user_id": null,
+      "user": null,
+      "app": {
+        "name": "Super Admin Dashboard",
+        "client_id": "app_landa_admin"
+      },
+      "session_id": null,
+      "method": "GET",
+      "endpoint": "/admin/activities",
+      "action_type": "admin_get_admin_activities",
+      "metadata": {
+        "app_name": "Super Admin Dashboard",
+        "app_client_id": "app_landa_admin"
+      },
+      "query_params": {
+        "page": "1",
+        "page_size": "50"
+      },
+      "response_status": 200,
+      "ip_address": "127.0.0.1",
+      "created_at": "2024-01-20T16:00:00"
+    }
+  ],
+  "pagination": {
+    "page": 1,
+    "page_size": 50,
+    "total_items": 5000,
+    "total_pages": 100
+  }
+}
+```
+
+**Interpretación de los campos `user_id`, `user`, y `app`:**
+
+Para el frontend/dashboard, use esta lógica para mostrar quién realizó la acción:
+
+1. **Si `user_id` tiene valor y `user` no es `null`**: 
+   - Es una actividad de un usuario autenticado
+   - Muestre: `"{user.first_name} {user.last_name}"` o `"{user.email}"`
+
+2. **Si `user_id` es `null` y `app` tiene valor**:
+   - Es una actividad de una aplicación OAuth2 (admin dashboard, API, etc.)
+   - Muestre: `"{app.name}"` o `"App: {app.name}"`
+   - **NO muestre "Sin usuario"** - muestre el nombre de la aplicación
+
+3. **Si ambos `user_id` y `app` son `null`**:
+   - Es una actividad de un usuario guest (sin autenticar)
+   - Muestre: `"Usuario guest"` o `"Anónimo"`
+
+**Ejemplo de código para el frontend:**
+```javascript
+function getActivityActor(activity) {
+  if (activity.user_id && activity.user) {
+    return `${activity.user.first_name} ${activity.user.last_name}`;
+  } else if (activity.app) {
+    return activity.app.name;  // Nombre de la aplicación OAuth2
+  } else {
+    return "Usuario guest";
+  }
+}
+```
+
+**Casos de Uso:**
+- Monitorear todas las actividades del sistema
+- Ver actividades de usuarios específicos junto con actividades de admin
+- Filtrar actividades por tipo de acción en todo el sistema
+- Analizar patrones de uso globales
+- Auditar actividades administrativas (usando `exclude_admin=false`)
 
 ---
 

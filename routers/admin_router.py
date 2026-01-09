@@ -1101,6 +1101,65 @@ def seed_default_settings(
 # ==================== USER ACTIVITY TRACKING (continued) ====================
 
 @router.get(
+    "/activities",
+    response_model=dict,  # Using dict because schema is complex
+    summary="Get all activities",
+    description="""Get all activities from all users with pagination and optional filters.
+    
+    This endpoint returns activities from all users (or filtered by user_id if provided).
+    Useful for admin analytics and monitoring system-wide activity.
+    
+    Filters:
+    - `user_id`: Filter by specific user
+    - `action_type`: Filter by action type (e.g., "view_products", "add_to_cart")
+    - `start_date`, `end_date`: Filter by date range (ISO format)
+    - `exclude_admin`: If true, excludes admin activities (endpoints starting with /admin)
+    """
+)
+def get_all_activities(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=100),
+    user_id: Optional[int] = Query(None, description="Filter by user ID"),
+    action_type: Optional[str] = Query(None, description="Filter by action type"),
+    start_date: Optional[str] = Query(None, description="Start date (ISO format)"),
+    end_date: Optional[str] = Query(None, description="End date (ISO format)"),
+    exclude_admin: bool = Query(False, description="Exclude admin activities"),
+    app=Depends(admin_service.require_scope("users:read")),
+    db: Session = Depends(get_db)
+):
+    from services import activity_service
+    from datetime import datetime
+    from fastapi import HTTPException
+    
+    # Parse dates if provided
+    start_dt = None
+    end_dt = None
+    
+    if start_date:
+        try:
+            start_dt = datetime.fromisoformat(start_date.replace('Z', '+00:00'))
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid start_date format. Use ISO format.")
+    
+    if end_date:
+        try:
+            end_dt = datetime.fromisoformat(end_date.replace('Z', '+00:00'))
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid end_date format. Use ISO format.")
+    
+    return activity_service.get_all_activities(
+        db=db,
+        page=page,
+        page_size=page_size,
+        user_id=user_id,
+        action_type=action_type,
+        start_date=start_dt,
+        end_date=end_dt,
+        exclude_admin=exclude_admin
+    )
+
+
+@router.get(
     "/users/{user_id}/activities",
     response_model=dict,  # Using dict because schema is complex
     summary="Get user activities",
@@ -1108,6 +1167,11 @@ def seed_default_settings(
     
     You can filter by action_type (e.g., "view_products", "add_to_cart", "checkout")
     and date range.
+    
+    Filters:
+    - `action_type`: Filter by action type
+    - `start_date`, `end_date`: Filter by date range (ISO format)
+    - `exclude_admin`: If true, excludes admin activities (endpoints starting with /admin)
     """
 )
 def get_user_activities(
@@ -1117,6 +1181,7 @@ def get_user_activities(
     action_type: Optional[str] = Query(None, description="Filter by action type"),
     start_date: Optional[str] = Query(None, description="Start date (ISO format)"),
     end_date: Optional[str] = Query(None, description="End date (ISO format)"),
+    exclude_admin: bool = Query(False, description="Exclude admin activities"),
     app=Depends(admin_service.require_scope("users:read")),
     db: Session = Depends(get_db)
 ):
@@ -1147,7 +1212,8 @@ def get_user_activities(
         page_size=page_size,
         action_type=action_type,
         start_date=start_dt,
-        end_date=end_dt
+        end_date=end_dt,
+        exclude_admin=exclude_admin
     )
 
 
