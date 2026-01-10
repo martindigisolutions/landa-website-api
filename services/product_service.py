@@ -136,14 +136,21 @@ def get_categories(db: Session, lang: str = "es") -> List[CategoryGroupPublic]:
     return result
 
 
-def _product_to_public(product: Product, lang: str = "es", db: Session = None) -> ProductPublic:
-    """Convert product model to localized public response with grouped variants"""
+def _product_to_public(product: Product, lang: str = "es", db: Session = None, include_variants: bool = True) -> ProductPublic:
+    """Convert product model to localized public response with grouped variants
+
+    Args:
+        product: Product model instance
+        lang: Language code for localization
+        db: Database session (needed to resolve related products)
+        include_variants: Whether to include variant details in response
+    """
     variant_types = []
-    
+
     # Calculate min prices from variants (if product has variants)
     min_regular_price, min_sale_price = _get_min_variant_prices(product)
-    
-    if product.has_variants and product.variant_groups:
+
+    if include_variants and product.has_variants and product.variant_groups:
         # Group by variant_type
         grouped_by_type = {}
         for group in sorted(product.variant_groups, key=lambda g: g.display_order):
@@ -271,7 +278,8 @@ def get_products(
     similar_to: Optional[str] = None,
     page: int = 1,
     page_size: int = 20,
-    sort_by: str = "recommended"
+    sort_by: str = "recommended",
+    include_variants: bool = True
 ) -> PaginatedProductResponse:
     """Get paginated list of products with localization.
     
@@ -423,20 +431,21 @@ def get_products(
     
     # Paginate with eager loading to prevent N+1 queries
     offset = (page - 1) * page_size
-    # Eager load relationships to avoid N+1 queries
+    # Always eager load variant_groups to calculate min prices correctly
+    # The include_variants flag only controls whether variant details are included in the response
     query = query.options(
         selectinload(Product.variant_groups).selectinload(ProductVariantGroup.variants),
         selectinload(Product.product_categories).joinedload(ProductCategory.category)
     )
     products = query.offset(offset).limit(page_size).all()
-    
+
     return PaginatedProductResponse(
         page=page,
         page_size=page_size,
         total_items=total_items,
         total_pages=total_pages,
         sorted_by=sort_by,
-        results=[_product_to_public(p, lang, None) for p in products]  # Pass None for db to skip related products in list
+        results=[_product_to_public(p, lang, None, include_variants) for p in products]  # Pass None for db to skip related products in list
     )
 
 

@@ -79,6 +79,7 @@ def get_products(
     category_group: Optional[str] = Query(None, description="Filter by category group slug"),
     similar_to: Optional[str] = Query(None, description="Get similar products for this product (seller_sku or product ID)"),
     sort_by: Optional[str] = Query("recommended", description="Sort by: recommended, bestseller, name, name_asc, name_desc, price_asc, price_desc, newest"),
+    include_variants: bool = Query(True, description="Include variant details in response. Set to false for better performance when variants are not needed."),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100)
 ):
@@ -96,7 +97,8 @@ def get_products(
         similar_to=similar_to,
         page=page,
         page_size=page_size,
-        sort_by=sort_by
+        sort_by=sort_by,
+        include_variants=include_variants
     )
 
 
