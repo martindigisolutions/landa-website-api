@@ -355,3 +355,19 @@ class ReleaseLockResponse(BaseModel):
     """Response from DELETE /cart/lock or POST /cart/lock/release"""
     success: bool
     message: str
+
+
+class ExtendLockRequest(BaseModel):
+    """Request to extend cart lock"""
+    lock_token: str
+
+
+class ExtendLockResponse(BaseModel):
+    """Response from POST /cart/lock/extend"""
+    success: bool
+    expires_at: Optional[datetime] = None
+    expires_in_seconds: Optional[int] = None
+    message: Optional[str] = None
+    # Error fields
+    error: Optional[str] = None  # "insufficient_stock", "lock_not_found", "lock_already_used", etc.
+    unavailable_items: Optional[List[UnavailableItem]] = None

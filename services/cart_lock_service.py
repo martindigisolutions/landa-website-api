@@ -13,7 +13,7 @@ from models import (
     Product, ProductVariant, User, LOCK_EXPIRATION_MINUTES
 )
 from schemas.cart import (
-    LockCartResponse, ReleaseLockResponse, UnavailableItem, 
+    LockCartResponse, ReleaseLockResponse, ExtendLockResponse, UnavailableItem, 
     PaymentIntentInfo, UpdatePaymentMethodResponse
 )
 
@@ -365,27 +365,83 @@ def release_lock(
 
 def use_lock(
     db: Session,
-    lock_token: str
-) -> Tuple[bool, str, Optional[CartLock]]:
+    lock_token: str,
+    validate_stock_if_expired: bool = True
+) -> Tuple[bool, str, Optional[CartLock], bool]:
     """
     Mark a lock as used (when creating order).
-    Returns (success, error_message, lock)
+    Returns (success, error_message, lock, was_expired)
+    
+    Special handling: If lock expired but has a successful payment, allow order creation
+    after validating stock availability. This prevents orders from being rejected when 
+    payment succeeded but user took >5 minutes, while still ensuring stock is available.
+    
+    Args:
+        validate_stock_if_expired: If True and lock expired, validate stock before allowing
     """
     lock = db.query(CartLock).filter(CartLock.token == lock_token).first()
     
     if not lock:
-        return False, "lock_not_found", None
+        return False, "lock_not_found", None, False
     
     if lock.status == "used":
-        return False, "lock_already_used", None
+        return False, "lock_already_used", None, False
     
-    if lock.status == "expired" or lock.expires_at < datetime.utcnow():
+    # Check if lock expired
+    is_expired = lock.status == "expired" or lock.expires_at < datetime.utcnow()
+    
+    if is_expired:
+        # Special case: If lock expired but has a payment_intent_id, check if payment succeeded
+        if lock.stripe_payment_intent_id:
+            try:
+                import stripe
+                from config import STRIPE_SECRET_KEY
+                if STRIPE_SECRET_KEY:
+                    stripe.api_key = STRIPE_SECRET_KEY
+                    payment_intent = stripe.PaymentIntent.retrieve(lock.stripe_payment_intent_id)
+                    
+                    # If payment succeeded, validate stock and allow order creation
+                    if payment_intent.status == "succeeded":
+                        logger.info(f"Lock {lock_token} expired but payment succeeded, validating stock...")
+                        
+                        # Validate stock availability if requested
+                        if validate_stock_if_expired:
+                            stock_available = True
+                            for reservation in lock.reservations:
+                                product = reservation.product
+                                variant = reservation.variant
+                                available_stock = _get_available_stock(product, variant, db)
+                                
+                                if reservation.quantity > available_stock:
+                                    logger.warning(
+                                        f"Lock {lock_token} expired and stock insufficient: "
+                                        f"product_id={product.id}, variant_id={variant.id if variant else None}, "
+                                        f"requested={reservation.quantity}, available={available_stock}"
+                                    )
+                                    stock_available = False
+                                    break
+                            
+                            if not stock_available:
+                                # Stock no longer available, reject order (frontend should refund)
+                                return False, "lock_expired_no_stock", lock, True
+                        
+                        # Stock available, allow order creation
+                        logger.info(f"Lock {lock_token} expired but payment succeeded and stock available, allowing order creation")
+                        lock.status = "used"
+                        lock.used_at = datetime.utcnow()
+                        db.commit()
+                        return True, "", lock, True
+            except Exception as e:
+                logger.warning(f"Failed to check payment status for expired lock {lock_token}: {e}")
+                # Fall through to normal expiration handling
+        
+        # Lock expired and no successful payment, reject
         lock.status = "expired"
         db.commit()
-        return False, "lock_expired", None
+        return False, "lock_expired", None, True
     
     if lock.status == "cancelled":
-        return False, "lock_cancelled", None
+        return False, "lock_cancelled", None, False
     
     # Mark as used
     lock.status = "used"
@@ -394,7 +450,94 @@ def use_lock(
     
     logger.info(f"Lock {lock_token} used for order creation")
     
-    return True, "", lock
+    return True, "", lock, False
+
+
+def extend_lock(db: Session, lock_token: str) -> ExtendLockResponse:
+    """
+    Extend a cart lock by 5 minutes and re-reserve stock if lock was expired.
+    
+    This allows users who took longer than 5 minutes to complete payment to
+    extend their lock before processing payment, preventing "lock expired" errors.
+    
+    Behavior:
+    - If lock is active (not expired): Extends expires_at by 5 minutes
+    - If lock is expired: Validates stock, re-reserves by reactivating lock
+    - If lock is used/cancelled: Returns error
+    
+    Returns ExtendLockResponse with success status and new expiration time.
+    """
+    lock = db.query(CartLock).filter(CartLock.token == lock_token).first()
+    
+    if not lock:
+        return ExtendLockResponse(
+            success=False,
+            error="lock_not_found",
+            message="Lock not found"
+        )
+    
+    if lock.status == "used":
+        return ExtendLockResponse(
+            success=False,
+            error="lock_already_used",
+            message="This lock was already used to create an order"
+        )
+    
+    if lock.status == "cancelled":
+        return ExtendLockResponse(
+            success=False,
+            error="lock_cancelled",
+            message="This lock was cancelled"
+        )
+    
+    # Check if lock is expired
+    is_expired = lock.status == "expired" or lock.expires_at < datetime.utcnow()
+    
+    # If expired, validate stock availability before re-reserving
+    if is_expired:
+        unavailable_items = []
+        for reservation in lock.reservations:
+            product = reservation.product
+            variant = reservation.variant
+            available_stock = _get_available_stock(product, variant, db)
+            
+            if reservation.quantity > available_stock:
+                unavailable_items.append(UnavailableItem(
+                    product_id=product.id,
+                    product_name=product.name,
+                    variant_id=variant.id if variant else None,
+                    variant_name=variant.name if variant else None,
+                    requested=reservation.quantity,
+                    available=available_stock
+                ))
+        
+        if unavailable_items:
+            return ExtendLockResponse(
+                success=False,
+                error="insufficient_stock",
+                message="Some items are no longer available",
+                unavailable_items=unavailable_items
+            )
+        
+        # Stock is available - reactivate expired lock
+        logger.info(f"Re-activating expired lock {lock_token} - stock available")
+        lock.status = "active"
+    
+    # Extend expiration time by 5 minutes
+    new_expires_at = datetime.utcnow() + timedelta(minutes=LOCK_EXPIRATION_MINUTES)
+    lock.expires_at = new_expires_at
+    db.commit()
+    
+    expires_in_seconds = int((new_expires_at - datetime.utcnow()).total_seconds())
+    
+    logger.info(f"Extended lock {lock_token} until {new_expires_at} ({expires_in_seconds}s remaining)")
+    
+    return ExtendLockResponse(
+        success=True,
+        expires_at=new_expires_at,
+        expires_in_seconds=expires_in_seconds,
+        message="Lock extended successfully"
+    )
 
 
 def cleanup_expired_locks(db: Session) -> int:

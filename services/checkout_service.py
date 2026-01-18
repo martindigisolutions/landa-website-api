@@ -262,9 +262,40 @@ def create_order(
         raise HTTPException(status_code=400, detail="Cart is empty")
     
     # Use lock_token to create order
-    success, error, lock = use_lock(db, data.lock_token)
+    success, error, lock, was_expired = use_lock(db, data.lock_token, validate_stock_if_expired=True)
     
     if not success:
+        # Before rejecting, check if order already exists for this payment_intent_id
+        if lock and lock.stripe_payment_intent_id:
+            existing_order = db.query(Order).filter(
+                Order.stripe_payment_intent_id == lock.stripe_payment_intent_id
+            ).first()
+            if existing_order:
+                # Order already exists, return success with existing order
+                logger.info(f"Order already exists for PaymentIntent {lock.stripe_payment_intent_id}: order #{existing_order.id}")
+                return {
+                    "success": True,
+                    "order_id": str(existing_order.id),
+                    "order_number": f"ORD-{existing_order.id:06d}",
+                    "status": existing_order.status,
+                    "total": existing_order.total,
+                    "items_count": len(existing_order.items),
+                    "message": "Order already created"
+                }
+        
+        # Special handling for expired lock without stock - payment was successful but stock unavailable
+        if error == "lock_expired_no_stock":
+            raise HTTPException(
+                status_code=409,  # Conflict - payment succeeded but order cannot be created
+                detail={
+                    "error": "lock_expired_no_stock",
+                    "message": "Your payment was processed, but the items are no longer available. A refund will be processed automatically.",
+                    "payment_succeeded": True,
+                    "requires_refund": True,
+                    "success": False
+                }
+            )
+        
         error_messages = {
             "lock_not_found": "Lock not found",
             "lock_already_used": "This lock was already used to create an order",

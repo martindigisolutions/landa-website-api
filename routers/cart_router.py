@@ -18,7 +18,8 @@ from schemas.cart import (
     ClearCartResponse, MergeCartResponse, RecommendationsResponse,
     UpdateShippingRequest, UpdateShippingResponse,
     UpdatePaymentMethodRequest, UpdatePaymentMethodResponse,
-    LockCartResponse, ReleaseLockRequest, ReleaseLockResponse
+    LockCartResponse, ReleaseLockRequest, ReleaseLockResponse,
+    ExtendLockRequest, ExtendLockResponse
 )
 from services import cart_lock_service
 from utils.language import get_language_from_header
@@ -554,3 +555,65 @@ async def release_lock_beacon(
         )
     
     return cart_lock_service.release_lock(db, lock_token)
+
+
+@router.post(
+    "/lock/extend",
+    response_model=ExtendLockResponse,
+    summary="Extend cart lock",
+    description="""
+    Extend a cart lock by 5 minutes. Use this BEFORE processing payment if the user
+    took longer than expected to complete the payment form.
+    
+    **Behavior:**
+    - If lock is active: Extends expiration time by 5 minutes
+    - If lock expired but stock is available: Re-reserves stock and extends lock
+    - If lock expired and stock unavailable: Returns error (409 Conflict)
+    - If lock is used/cancelled: Returns error (400 Bad Request)
+    
+    **When to call:**
+    - Right before calling Stripe to process payment
+    - If user took >5 minutes to enter payment details
+    
+    **Request Body:**
+    - `lock_token`: The token from POST /cart/lock
+    
+    **Success Response (200):**
+    - `success`: true
+    - `expires_at`: New expiration datetime
+    - `expires_in_seconds`: Seconds until expiration
+    
+    **Error Responses:**
+    - 409 Conflict: Stock no longer available (`insufficient_stock`)
+    - 400 Bad Request: Lock invalid (`lock_not_found`, `lock_already_used`, `lock_cancelled`)
+    """
+)
+def extend_lock(
+    data: ExtendLockRequest,
+    db: Session = Depends(get_db)
+):
+    result = cart_lock_service.extend_lock(db, data.lock_token)
+    
+    # Convert to HTTP status codes
+    if not result.success:
+        if result.error == "insufficient_stock":
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "success": False,
+                    "error": result.error,
+                    "message": result.message,
+                    "unavailable_items": result.unavailable_items or []
+                }
+            )
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "success": False,
+                    "error": result.error,
+                    "message": result.message
+                }
+            )
+    
+    return result
