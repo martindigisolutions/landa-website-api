@@ -61,13 +61,13 @@ def get_optional_user(
     description="""
     Create an order using a valid lock token.
     
-    **New Flow (Recommended):**
+    **Flow:**
     1. Call POST /cart/lock to reserve stock
     2. Process payment (Stripe/Zelle)
     3. Call POST /orders with lock_token
     
     **Request Body:**
-    - `lock_token`: Token from POST /cart/lock (required for new flow)
+    - `lock_token`: Token from POST /cart/lock (required)
     - `payment_id`: Stripe payment ID (optional, for confirmation)
     
     **Response:**

@@ -127,25 +127,25 @@ def create_order(
     - `Authorization`: Bearer token (for authenticated users)
     
     **Body:**
-    - `address`: Shipping address
-    - `shipping_method`: Selected shipping method
-    - `payment_method`: Selected payment method
+    - `lock_token`: Required - Token from POST /cart/lock
+    - `payment_id`: Optional - Stripe payment ID (for confirmation)
     
-    **What happens:**
-    1. Validates all cart items (stock, availability)
-    2. Creates the order with current prices from DB
-    3. Deducts stock from products/variants
-    4. Clears the cart
+    **Flow:**
+    1. Call POST /cart/lock to reserve stock and get lock_token
+    2. Call POST /checkout/order with lock_token to create the order
+    3. Stock is already reserved, totals are frozen from lock time
     
     **Response:**
+    - `success`: true
     - `order_id`: The created order ID
-    - `status`: Order status (pending_payment)
+    - `order_number`: Formatted order number (e.g., ORD-000001)
+    - `status`: Order status (processing_payment, pending_verification, etc.)
     - `total`: Order total
     - `items_count`: Number of items in the order
     
     **Errors:**
-    - 400: Cart is empty or invalid request
-    - 409: Cart validation failed (stock issues, removed products)
+    - 400: Cart is empty, missing lock_token, or invalid request
+    - 400: Lock not found, expired, already used, or cancelled
     """
     if not session_id and not user:
         raise HTTPException(

@@ -313,6 +313,7 @@ def _build_cart_response(cart: Cart, db: Session, lang: str = "es") -> CartRespo
             phone=cart.shipping_phone,
             email=cart.shipping_email,
             street=f"{store_addr.street_number} {store_addr.street_name} {store_addr.street_suffix or ''} {store_addr.street_direction or ''}".strip(),
+            apartment=None,  # Store address doesn't have apartment
             city=store_addr.city,
             state=store_addr.state,
             zipcode=store_addr.zipcode,
@@ -326,6 +327,7 @@ def _build_cart_response(cart: Cart, db: Session, lang: str = "es") -> CartRespo
             phone=cart.shipping_phone,
             email=cart.shipping_email,
             street=cart.shipping_street,
+            apartment=cart.shipping_apartment,
             city=cart.shipping_city,
             state=cart.shipping_state,
             zipcode=cart.shipping_zipcode,
@@ -551,6 +553,7 @@ def update_shipping_address(
     if not is_pickup:
         # Only update address for delivery
         cart.shipping_street = data.street
+        cart.shipping_apartment = data.apartment
         cart.shipping_city = data.city or ""
         cart.shipping_state = (data.state or "").upper()
         cart.shipping_zipcode = zipcode or ""
@@ -572,6 +575,7 @@ def update_shipping_address(
             phone=cart.shipping_phone,
             email=cart.shipping_email,
             street=f"{store_addr.street_number} {store_addr.street_name} {store_addr.street_suffix or ''} {store_addr.street_direction or ''}".strip(),
+            apartment=None,  # Store address doesn't have apartment
             city=store_addr.city,
             state=store_addr.state,
             zipcode=store_addr.zipcode,
@@ -584,6 +588,7 @@ def update_shipping_address(
             phone=cart.shipping_phone,
             email=cart.shipping_email,
             street=cart.shipping_street,
+            apartment=cart.shipping_apartment,
             city=cart.shipping_city,
             state=cart.shipping_state,
             zipcode=cart.shipping_zipcode,

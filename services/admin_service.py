@@ -1449,7 +1449,7 @@ def _transform_address_to_tiktok_format(address_dict: Optional[dict], user: Opti
     address_line3 = ""
     address_line4 = ""
     
-    # Build full address
+    # Build full address (include apartment if available)
     address_parts = []
     if country:
         address_parts.append(country)
@@ -1457,8 +1457,12 @@ def _transform_address_to_tiktok_format(address_dict: Optional[dict], user: Opti
         address_parts.append(state)
     if city:
         address_parts.append(city)
-    if street:
-        address_parts.append(street)
+    # Build street with apartment if available
+    street_line = street
+    if apartment:
+        street_line = f"{street}, {apartment}"
+    if street_line:
+        address_parts.append(street_line)
     full_address = ",".join(address_parts) if address_parts else None
     
     # Build district_info

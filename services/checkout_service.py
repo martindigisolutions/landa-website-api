@@ -42,18 +42,6 @@ def _get_cart(db: Session, session_id: Optional[str], user_id: Optional[int]) ->
     return cart
 
 
-def _get_item_price(product: Product, variant: Optional[ProductVariant]) -> float:
-    """Get the current price for a product/variant"""
-    if variant:
-        if variant.sale_price is not None:
-            return variant.sale_price
-        if variant.regular_price is not None:
-            return variant.regular_price
-    if product.sale_price is not None:
-        return product.sale_price
-    return product.regular_price or 0
-
-
 def _get_item_stock(product: Product, variant: Optional[ProductVariant]) -> Tuple[int, bool]:
     """Get stock and is_in_stock for product/variant"""
     if variant:
@@ -248,16 +236,22 @@ def create_order(
     """
     Create an order using the server-side cart.
     
-    **New Flow (with lock_token):**
-    - Uses pre-validated lock with reserved stock
+    Requires a lock_token from POST /cart/lock to ensure:
+    - Stock is reserved and validated
     - Totals are frozen at lock time
-    - Stock already reserved, just needs permanent deduction
-    
-    **Legacy Flow (without lock_token):**
-    - Validates stock at order time
-    - Risk of overselling in concurrent scenarios
+    - Safe concurrent order creation
     """
     from services.cart_lock_service import use_lock
+    
+    # lock_token is required
+    if not data.lock_token:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": "lock_token_required",
+                "message": "lock_token is required. Call POST /cart/lock first to get a lock token."
+            }
+        )
     
     user_id = user.id if user else None
     
@@ -267,298 +261,152 @@ def create_order(
     if not cart or not cart.items:
         raise HTTPException(status_code=400, detail="Cart is empty")
     
-    # NEW FLOW: Using lock_token
-    if data.lock_token:
-        success, error, lock = use_lock(db, data.lock_token)
-        
-        if not success:
-            error_messages = {
-                "lock_not_found": "Lock not found",
-                "lock_already_used": "This lock was already used to create an order",
-                "lock_expired": "Lock expired. Please try again.",
-                "lock_cancelled": "Lock was cancelled"
-            }
-            raise HTTPException(
-                status_code=400,
-                detail={
-                    "error": error,
-                    "message": error_messages.get(error, "Lock validation failed"),
-                    "success": False
-                }
-            )
-        
-        # Use frozen totals from lock
-        total = lock.total
-        payment_method = cart.payment_method or "stripe"
-        shipping_method = "pickup" if cart.is_pickup else "delivery"
-        
-        # Build address from cart
-        address_data = {
-            "street": cart.shipping_street or "",
-            "city": cart.shipping_city or "",
-            "state": cart.shipping_state or "",
-            "zip": cart.shipping_zipcode or "",
-            "country": cart.shipping_country or "US"
+    # Use lock_token to create order
+    success, error, lock = use_lock(db, data.lock_token)
+    
+    if not success:
+        error_messages = {
+            "lock_not_found": "Lock not found",
+            "lock_already_used": "This lock was already used to create an order",
+            "lock_expired": "Lock expired. Please try again.",
+            "lock_cancelled": "Lock was cancelled"
         }
-        
-        # Prepare order items from reservations
-        order_items_data = []
-        for reservation in lock.reservations:
-            product = reservation.product
-            variant = reservation.variant
-            
-            order_items_data.append({
-                "product_id": reservation.product_id,
-                "variant_id": reservation.variant_id,
-                "variant_name": variant.name if variant else None,
-                "quantity": reservation.quantity,
-                "price": reservation.unit_price
-            })
-        
-        # Determine order status based on payment method
-        # IMPORTANT: For Stripe, the frontend already confirmed payment, so we start as "processing_payment"
-        # The webhook will change it to "paid" when Stripe confirms
-        if payment_method == "stripe":
-            if lock.stripe_payment_intent_id:
-                # PaymentIntent was created and frontend confirmed payment
-                # Order starts as "processing_payment" until webhook confirms payment
-                order_status = "processing_payment"
-                payment_status = "pending"  # Will be updated to "completed" by webhook
-                logger.info(f"Order created with Stripe PaymentIntent {lock.stripe_payment_intent_id}. Status: processing_payment, waiting for webhook confirmation.")
-            else:
-                # No PaymentIntent - Stripe not configured or failed
-                # This should not happen, but handle gracefully
-                logger.warning(f"Stripe payment selected but no PaymentIntent found for lock {lock.token}. Marking as processing_payment.")
-                order_status = "processing_payment"
-                payment_status = "pending"
-        else:
-            # Non-Stripe payment methods require manual verification
-            order_status = "pending_verification"
-            payment_status = "pending"
-        
-        # Create order with frozen totals from lock
-        order = Order(
-            session_id=session_id,
-            user_id=user_id,
-            shipping_method=shipping_method,
-            payment_method=payment_method,
-            address=address_data,
-            subtotal=lock.subtotal,
-            tax=lock.tax,
-            shipping_fee=lock.shipping_fee,
-            total=total,  # Use lock.total which matches subtotal + tax + shipping_fee
-            status=order_status,
-            payment_status=payment_status,
-            stripe_payment_intent_id=lock.stripe_payment_intent_id
-        )
-        db.add(order)
-        db.flush()  # Get order.id
-        
-        # Update PaymentIntent metadata with order_id for webhook lookup
-        if lock.stripe_payment_intent_id and payment_method == "stripe":
-            try:
-                import stripe
-                from config import STRIPE_SECRET_KEY
-                if STRIPE_SECRET_KEY:
-                    stripe.api_key = STRIPE_SECRET_KEY
-                    stripe.PaymentIntent.modify(
-                        lock.stripe_payment_intent_id,
-                        metadata={
-                            "order_id": str(order.id),
-                            "lock_token": lock.token,
-                            "cart_id": str(lock.cart_id)
-                        }
-                    )
-                    logger.info(f"Updated PaymentIntent {lock.stripe_payment_intent_id} metadata with order_id {order.id}")
-                    
-                    # IMPORTANT: Check if PaymentIntent is already succeeded (webhook may have arrived before order creation)
-                    # If so, update order status immediately instead of waiting for webhook
-                    try:
-                        import stripe
-                        from config import STRIPE_SECRET_KEY
-                        if STRIPE_SECRET_KEY:
-                            stripe.api_key = STRIPE_SECRET_KEY
-                            pi = stripe.PaymentIntent.retrieve(lock.stripe_payment_intent_id)
-                            if pi.status == "succeeded" and order.status == "processing_payment":
-                                logger.info(f"PaymentIntent {lock.stripe_payment_intent_id} already succeeded, updating order #{order.id} to paid immediately")
-                                order.status = "paid"
-                                order.payment_status = "completed"
-                                from datetime import datetime
-                                order.paid_at = datetime.utcnow()
-                                db.commit()
-                                logger.info(f"Order #{order.id} updated to paid immediately (webhook arrived before order creation)")
-                    except Exception as e:
-                        logger.warning(f"Failed to check PaymentIntent status: {e}")
-                        # Non-critical, webhook will handle it
-            except Exception as e:
-                logger.warning(f"Failed to update PaymentIntent metadata: {e}")
-                # Non-critical, webhook can still find order by stripe_payment_intent_id
-        
-        # Create order items and deduct stock permanently
-        # OPTIMIZATION: Batch load all products and variants to avoid N+1 queries
-        variant_ids = [item["variant_id"] for item in order_items_data if item["variant_id"]]
-        product_ids = [item["product_id"] for item in order_items_data if not item["variant_id"]]
-        
-        # Load all variants in one query
-        variants_dict = {}
-        if variant_ids:
-            variants = db.query(ProductVariant).filter(ProductVariant.id.in_(variant_ids)).all()
-            variants_dict = {v.id: v for v in variants}
-        
-        # Load all products in one query
-        products_dict = {}
-        if product_ids:
-            products = db.query(Product).filter(Product.id.in_(product_ids)).all()
-            products_dict = {p.id: p for p in products}
-        
-        # Create order items and deduct stock
-        for item_data in order_items_data:
-            db.add(OrderItem(
-                order_id=order.id,
-                product_id=item_data["product_id"],
-                variant_id=item_data["variant_id"],
-                variant_name=item_data["variant_name"],
-                quantity=item_data["quantity"],
-                price=item_data["price"]
-            ))
-            
-            # Deduct stock (was reserved, now permanent) - using pre-loaded objects
-            if item_data["variant_id"]:
-                variant = variants_dict.get(item_data["variant_id"])
-                if variant:
-                    variant.stock = max(0, (variant.stock or 0) - item_data["quantity"])
-                    if variant.stock <= 0:
-                        variant.is_in_stock = False
-            else:
-                product = products_dict.get(item_data["product_id"])
-                if product:
-                    product.stock = max(0, (product.stock or 0) - item_data["quantity"])
-                    if product.stock <= 0:
-                        product.is_in_stock = False
-        
-        # Clear cart after successful order
-        db.query(CartItem).filter(CartItem.cart_id == cart.id).delete()
-        
-        # Clear cart shipping/payment info for next order
-        cart.payment_method = None
-        
-        db.commit()
-        
-        return {
-            "success": True,
-            "order_id": str(order.id),
-            "order_number": f"ORD-{order.id:06d}",
-            "status": order.status,
-            "total": total,
-            "items_count": len(order_items_data),
-            "message": "Order created successfully"
-        }
-    
-    # LEGACY FLOW: Without lock_token (backwards compatibility)
-    valid_methods = ["stripe", "zelle", "cashapp", "venmo", "credit_card", "cash"]
-    if not data.payment_method or data.payment_method not in valid_methods:
-        raise HTTPException(status_code=400, detail="Invalid payment method")
-    
-    if not data.address:
-        raise HTTPException(status_code=400, detail="Address is required")
-    
-    # Validate all items (strict validation)
-    valid_items, issues = _validate_cart_items(cart, db)
-    
-    if issues:
-        # Return validation errors - frontend should handle these
         raise HTTPException(
-            status_code=409,
+            status_code=400,
             detail={
-                "error": "cart_validation_failed",
-                "message": "Some items in your cart have issues",
-                "issues": [issue.model_dump() for issue in issues]
+                "error": error,
+                "message": error_messages.get(error, "Lock validation failed"),
+                "success": False
             }
         )
     
-    if not valid_items:
-        raise HTTPException(status_code=400, detail="No valid items in cart")
+    # Use frozen totals from lock
+    total = lock.total
+    payment_method = cart.payment_method or "stripe"
+    shipping_method = "pickup" if cart.is_pickup else "delivery"
     
-    # Calculate subtotal and prepare order items
-    subtotal = 0.0
+    # Build address from cart
+    address_data = {
+        "street": cart.shipping_street or "",
+        "apartment": cart.shipping_apartment or "",
+        "city": cart.shipping_city or "",
+        "state": cart.shipping_state or "",
+        "zip": cart.shipping_zipcode or "",
+        "country": cart.shipping_country or "US"
+    }
+    
+    # Prepare order items from reservations
     order_items_data = []
-    
-    for item in valid_items:
-        product = item.product
-        variant = item.variant
-        
-        price = _get_item_price(product, variant)
-        subtotal += price * item.quantity
+    for reservation in lock.reservations:
+        product = reservation.product
+        variant = reservation.variant
         
         order_items_data.append({
-            "product_id": product.id,
-            "variant_id": variant.id if variant else None,
+            "product_id": reservation.product_id,
+            "variant_id": reservation.variant_id,
             "variant_name": variant.name if variant else None,
-            "quantity": item.quantity,
-            "price": price
+            "quantity": reservation.quantity,
+            "price": reservation.unit_price
         })
     
-    # Calculate shipping and tax
-    from services.shipping_service import calculate_shipping_cost
-    from services.tax_service import TaxService, TaxAddress
+    # Determine order status based on payment method
+    # IMPORTANT: For Stripe, the frontend already confirmed payment, so we start as "processing_payment"
+    # The webhook will change it to "paid" when Stripe confirms
+    if payment_method == "stripe":
+        if lock.stripe_payment_intent_id:
+            # PaymentIntent was created and frontend confirmed payment
+            # Order starts as "processing_payment" until webhook confirms payment
+            order_status = "processing_payment"
+            payment_status = "pending"  # Will be updated to "completed" by webhook
+            logger.info(f"Order created with Stripe PaymentIntent {lock.stripe_payment_intent_id}. Status: processing_payment, waiting for webhook confirmation.")
+        else:
+            # No PaymentIntent - Stripe not configured or failed
+            # This should not happen, but handle gracefully
+            logger.warning(f"Stripe payment selected but no PaymentIntent found for lock {lock.token}. Marking as processing_payment.")
+            order_status = "processing_payment"
+            payment_status = "pending"
+    else:
+        # Non-Stripe payment methods require manual verification
+        order_status = "pending_verification"
+        payment_status = "pending"
     
-    cart_items_for_shipping = [
-        {"product_id": item_data["product_id"], "variant_id": item_data["variant_id"], "quantity": item_data["quantity"]}
-        for item_data in order_items_data
-    ]
-    
-    is_pickup = data.shipping_method == "pickup"
-    shipping_fee = 0.0
-    if not is_pickup:
-        try:
-            shipping_fee = calculate_shipping_cost(cart_items_for_shipping, db)
-        except Exception:
-            shipping_fee = 0.0
-    
-    # Calculate tax
-    tax = 0.0
-    try:
-        tax_service = TaxService(db)
-        tax_address = None
-        if data.address and data.address.city and data.address.state and data.address.zip:
-            tax_address = TaxAddress(
-                street_number="",
-                street_name=data.address.street or "",
-                city=data.address.city,
-                state=data.address.state,
-                zipcode=data.address.zip
-            )
-        
-        tax_result = tax_service.calculate_tax(
-            subtotal=subtotal,
-            shipping_fee=shipping_fee,
-            address=tax_address,
-            is_pickup=is_pickup
-        )
-        tax = tax_result.tax_amount
-    except Exception:
-        tax = 0.0
-    
-    total = round(subtotal + shipping_fee + tax, 2)
-    
-    # Create order
+    # Create order with frozen totals from lock
     order = Order(
         session_id=session_id,
         user_id=user_id,
-        shipping_method=data.shipping_method,
-        payment_method=data.payment_method,
-        address=data.address.model_dump(),
-        subtotal=subtotal,
-        tax=tax,
-        shipping_fee=shipping_fee,
-        total=total,
-        status="pending_payment"
+        shipping_method=shipping_method,
+        payment_method=payment_method,
+        address=address_data,
+        subtotal=lock.subtotal,
+        tax=lock.tax,
+        shipping_fee=lock.shipping_fee,
+        total=total,  # Use lock.total which matches subtotal + tax + shipping_fee
+        status=order_status,
+        payment_status=payment_status,
+        stripe_payment_intent_id=lock.stripe_payment_intent_id
     )
     db.add(order)
-    db.flush()
+    db.flush()  # Get order.id
+    
+    # Update PaymentIntent metadata with order_id for webhook lookup
+    if lock.stripe_payment_intent_id and payment_method == "stripe":
+        try:
+            import stripe
+            from config import STRIPE_SECRET_KEY
+            if STRIPE_SECRET_KEY:
+                stripe.api_key = STRIPE_SECRET_KEY
+                stripe.PaymentIntent.modify(
+                    lock.stripe_payment_intent_id,
+                    metadata={
+                        "order_id": str(order.id),
+                        "lock_token": lock.token,
+                        "cart_id": str(lock.cart_id)
+                    }
+                )
+                logger.info(f"Updated PaymentIntent {lock.stripe_payment_intent_id} metadata with order_id {order.id}")
+                
+                # IMPORTANT: Check if PaymentIntent is already succeeded (webhook may have arrived before order creation)
+                # If so, update order status immediately instead of waiting for webhook
+                try:
+                    import stripe
+                    from config import STRIPE_SECRET_KEY
+                    if STRIPE_SECRET_KEY:
+                        stripe.api_key = STRIPE_SECRET_KEY
+                        pi = stripe.PaymentIntent.retrieve(lock.stripe_payment_intent_id)
+                        if pi.status == "succeeded" and order.status == "processing_payment":
+                            logger.info(f"PaymentIntent {lock.stripe_payment_intent_id} already succeeded, updating order #{order.id} to paid immediately")
+                            order.status = "paid"
+                            order.payment_status = "completed"
+                            from datetime import datetime
+                            order.paid_at = datetime.utcnow()
+                            db.commit()
+                            logger.info(f"Order #{order.id} updated to paid immediately (webhook arrived before order creation)")
+                except Exception as e:
+                    logger.warning(f"Failed to check PaymentIntent status: {e}")
+                    # Non-critical, webhook will handle it
+        except Exception as e:
+            logger.warning(f"Failed to update PaymentIntent metadata: {e}")
+            # Non-critical, webhook can still find order by stripe_payment_intent_id
+    
+    # Create order items and deduct stock permanently
+    # OPTIMIZATION: Batch load all products and variants to avoid N+1 queries
+    variant_ids = [item["variant_id"] for item in order_items_data if item["variant_id"]]
+    product_ids = [item["product_id"] for item in order_items_data if not item["variant_id"]]
+    
+    # Load all variants in one query
+    variants_dict = {}
+    if variant_ids:
+        variants = db.query(ProductVariant).filter(ProductVariant.id.in_(variant_ids)).all()
+        variants_dict = {v.id: v for v in variants}
+    
+    # Load all products in one query
+    products_dict = {}
+    if product_ids:
+        products = db.query(Product).filter(Product.id.in_(product_ids)).all()
+        products_dict = {p.id: p for p in products}
     
     # Create order items and deduct stock
-    for i, item_data in enumerate(order_items_data):
+    for item_data in order_items_data:
         db.add(OrderItem(
             order_id=order.id,
             product_id=item_data["product_id"],
@@ -568,29 +416,38 @@ def create_order(
             price=item_data["price"]
         ))
         
-        # Deduct stock
-        cart_item = valid_items[i]
-        if cart_item.variant:
-            cart_item.variant.stock = max(0, (cart_item.variant.stock or 0) - item_data["quantity"])
-            if cart_item.variant.stock <= 0:
-                cart_item.variant.is_in_stock = False
+        # Deduct stock (was reserved, now permanent) - using pre-loaded objects
+        if item_data["variant_id"]:
+            variant = variants_dict.get(item_data["variant_id"])
+            if variant:
+                variant.stock = max(0, (variant.stock or 0) - item_data["quantity"])
+                if variant.stock <= 0:
+                    variant.is_in_stock = False
         else:
-            cart_item.product.stock = max(0, (cart_item.product.stock or 0) - item_data["quantity"])
-            if cart_item.product.stock <= 0:
-                cart_item.product.is_in_stock = False
+            product = products_dict.get(item_data["product_id"])
+            if product:
+                product.stock = max(0, (product.stock or 0) - item_data["quantity"])
+                if product.stock <= 0:
+                    product.is_in_stock = False
     
     # Clear cart after successful order
     db.query(CartItem).filter(CartItem.cart_id == cart.id).delete()
+    
+    # Clear cart shipping/payment info for next order
+    cart.payment_method = None
     
     db.commit()
     
     return {
         "success": True,
         "order_id": str(order.id),
-        "status": "pending_payment",
+        "order_number": f"ORD-{order.id:06d}",
+        "status": order.status,
         "total": total,
-        "items_count": len(order_items_data)
+        "items_count": len(order_items_data),
+        "message": "Order created successfully"
     }
+
 
 def confirm_manual_payment(data: ConfirmManualPayment, db: Session):
     order_id_str = data.order_id
@@ -791,7 +648,7 @@ def get_order_detail(order_id: str, user_id: str, db: Session):
         "zip": address_data.get("zip", ""),
         "country": address_data.get("country", ""),
         "street": address_data.get("street"),
-        "apartment": address_data.get("apartment")
+        "apartment": address_data.get("apartment") or None  # Convert empty string to None
     } if address_data else None
     
     # Get shipments for this order

@@ -116,6 +116,7 @@ class ShippingAddress(BaseModel):
     phone: Optional[str] = None
     email: Optional[str] = None
     street: Optional[str] = None
+    apartment: Optional[str] = None  # Apartment, suite, unit, etc.
     city: str
     state: str
     zipcode: str
@@ -125,6 +126,7 @@ class ShippingAddress(BaseModel):
 class UpdateShippingRequest(BaseModel):
     """Request to update shipping address"""
     street: Optional[str] = None
+    apartment: Optional[str] = None  # Apartment, suite, unit, etc.
     city: Optional[str] = None  # Optional for pickup
     state: Optional[str] = None  # Optional for pickup
     zipcode: Optional[str] = Field(None, alias="zipcode")

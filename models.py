@@ -402,6 +402,7 @@ class Cart(Base):
     shipping_phone = Column(String, nullable=True)
     shipping_email = Column(String, nullable=True)
     shipping_street = Column(String, nullable=True)
+    shipping_apartment = Column(String, nullable=True)  # Apartment, suite, unit, etc.
     shipping_city = Column(String, nullable=True)
     shipping_state = Column(String, nullable=True)
     shipping_zipcode = Column(String, nullable=True)
