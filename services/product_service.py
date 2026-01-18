@@ -19,6 +19,8 @@ from schemas.product import (
     RelatedProductPublic
 )
 from utils.language import localize_field, localize_gallery
+# Import function to calculate available stock (excluding active lock reservations)
+from services.cart_lock_service import _get_available_stock
 
 
 def _get_min_variant_prices(product: Product) -> tuple[float | None, float | None]:
@@ -179,6 +181,10 @@ def _product_to_public(product: Product, lang: str = "es", db: Session = None, i
                     
                     variants = []
                     for v in sorted(active_variants, key=lambda v: v.display_order):
+                        # Calculate available stock (excluding active lock reservations)
+                        available_stock = _get_available_stock(product, v, db) if db else (v.stock or 0)
+                        is_available = available_stock > 0 and v.is_in_stock
+                        
                         variants.append(ProductVariantPublic(
                             id=v.id,
                             seller_sku=v.seller_sku,
@@ -186,8 +192,8 @@ def _product_to_public(product: Product, lang: str = "es", db: Session = None, i
                             variant_value=v.variant_value,
                             regular_price=v.regular_price,
                             sale_price=v.sale_price,
-                            stock=v.stock,
-                            is_in_stock=v.is_in_stock,
+                            stock=available_stock,
+                            is_in_stock=is_available,
                             image_url=v.image_url
                         ))
                     
@@ -211,6 +217,10 @@ def _product_to_public(product: Product, lang: str = "es", db: Session = None, i
                 
                 variants = []
                 for v in sorted(active_variants, key=lambda v: v.display_order):
+                    # Calculate available stock (excluding active lock reservations)
+                    available_stock = _get_available_stock(product, v, db) if db else (v.stock or 0)
+                    is_available = available_stock > 0 and v.is_in_stock
+                    
                     variants.append(ProductVariantPublic(
                         id=v.id,
                         seller_sku=v.seller_sku,
@@ -218,8 +228,8 @@ def _product_to_public(product: Product, lang: str = "es", db: Session = None, i
                         variant_value=v.variant_value,
                         regular_price=v.regular_price,
                         sale_price=v.sale_price,
-                        stock=v.stock,
-                        is_in_stock=v.is_in_stock,
+                        stock=available_stock,
+                        is_in_stock=is_available,
                         image_url=v.image_url
                     ))
                 
@@ -237,6 +247,31 @@ def _product_to_public(product: Product, lang: str = "es", db: Session = None, i
         similar = _resolve_related_products(product.similar_products or [], db, lang)
         frequently_bought = _resolve_related_products(product.frequently_bought_together or [], db, lang)
     
+    # Calculate available stock (excluding active lock reservations)
+    # If product has variants, calculate sum of available variant stocks
+    # If no variants, calculate available stock for the product itself
+    if product.has_variants:
+        # For products with variants, stock is shown from variant_types
+        # But also calculate available stock for the product itself (frontend may use it)
+        # Note: Variants already have their available stock calculated above
+        if db:
+            # Sum up all variant available stocks
+            total_available = 0
+            for group in product.variant_groups:
+                for variant in group.variants:
+                    if getattr(variant, 'active', True):
+                        variant_available = _get_available_stock(product, variant, db)
+                        total_available += variant_available
+            available_stock = total_available
+            is_available = available_stock > 0
+        else:
+            available_stock = product.stock or 0
+            is_available = product.is_in_stock
+    else:
+        # For products without variants, calculate real available stock
+        available_stock = _get_available_stock(product, None, db) if db else (product.stock or 0)
+        is_available = available_stock > 0 and product.is_in_stock
+    
     return ProductPublic(
         id=product.id,
         seller_sku=product.seller_sku,
@@ -246,8 +281,8 @@ def _product_to_public(product: Product, lang: str = "es", db: Session = None, i
         tags=localize_field(product.tags, product.tags_en, lang),
         regular_price=min_regular_price,  # Use min from variants if available
         sale_price=min_sale_price,  # Use min from variants if available
-        stock=product.stock,
-        is_in_stock=product.is_in_stock,
+        stock=available_stock,
+        is_in_stock=is_available,
         restock_date=product.restock_date,
         low_stock_threshold=product.low_stock_threshold,
         is_favorite=product.is_favorite,
@@ -445,7 +480,7 @@ def get_products(
         total_items=total_items,
         total_pages=total_pages,
         sorted_by=sort_by,
-        results=[_product_to_public(p, lang, None, include_variants) for p in products]  # Pass None for db to skip related products in list
+        results=[_product_to_public(p, lang, db, include_variants) for p in products]  # Pass db to calculate available stock (excluding lock reservations)
     )
 
 

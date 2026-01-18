@@ -23,6 +23,7 @@ from schemas.cart import (
 )
 from services import cart_lock_service
 from utils.language import get_language_from_header
+from utils.messages import get_message
 
 router = APIRouter(prefix="/cart", tags=["Cart"])
 
@@ -575,6 +576,9 @@ async def release_lock_beacon(
     - Right before calling Stripe to process payment
     - If user took >5 minutes to enter payment details
     
+    **Localization:** Send `Accept-Language: en` header for English messages, 
+    or `Accept-Language: es` for Spanish (default).
+    
     **Request Body:**
     - `lock_token`: The token from POST /cart/lock
     
@@ -590,29 +594,104 @@ async def release_lock_beacon(
 )
 def extend_lock(
     data: ExtendLockRequest,
+    accept_language: Optional[str] = Header(None, alias="Accept-Language"),
     db: Session = Depends(get_db)
 ):
-    result = cart_lock_service.extend_lock(db, data.lock_token)
+    lang = get_language_from_header(accept_language)
+    result = cart_lock_service.extend_lock(db, data.lock_token, lang)
     
     # Convert to HTTP status codes
     if not result.success:
         if result.error == "insufficient_stock":
+            # Convert Pydantic models to dicts for JSON serialization
+            unavailable_items_dicts = [
+                item.model_dump() if hasattr(item, 'model_dump') else (item.dict() if hasattr(item, 'dict') else item)
+                for item in (result.unavailable_items or [])
+            ]
+            
+            # Build items list for message
+            item_names = []
+            for item in (result.unavailable_items or []):
+                if item.variant_name:
+                    item_names.append(f"{item.product_name} - {item.variant_name}")
+                else:
+                    item_names.append(item.product_name)
+            
+            items_text = ", ".join(item_names[:3])  # Show max 3 items
+            if len(item_names) > 3:
+                items_text += f" y {len(item_names) - 3} más" if lang == "es" else f" and {len(item_names) - 3} more"
+            
+            user_message = get_message("insufficient_stock", lang, items=items_text)
+            
             raise HTTPException(
                 status_code=409,
                 detail={
                     "success": False,
                     "error": result.error,
-                    "message": result.message,
-                    "unavailable_items": result.unavailable_items or []
+                    "error_code": "insufficient_stock",
+                    "message": result.message or user_message,
+                    "user_message": user_message,
+                    "unavailable_items": unavailable_items_dicts
                 }
             )
-        else:
+        elif result.error == "lock_already_used":
+            user_message = get_message("lock_already_used", lang)
             raise HTTPException(
                 status_code=400,
                 detail={
                     "success": False,
                     "error": result.error,
-                    "message": result.message
+                    "error_code": "lock_already_used",
+                    "message": result.message or user_message,
+                    "user_message": user_message
+                }
+            )
+        elif result.error == "lock_expired":
+            user_message = get_message("lock_expired", lang)
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "success": False,
+                    "error": result.error,
+                    "error_code": "lock_expired",
+                    "message": result.message or user_message,
+                    "user_message": user_message
+                }
+            )
+        elif result.error == "lock_not_found":
+            user_message = get_message("lock_not_found", lang)
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "success": False,
+                    "error": result.error,
+                    "error_code": "lock_not_found",
+                    "message": result.message or user_message,
+                    "user_message": user_message
+                }
+            )
+        elif result.error == "lock_cancelled":
+            user_message = get_message("lock_cancelled", lang)
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "success": False,
+                    "error": result.error,
+                    "error_code": "lock_cancelled",
+                    "message": result.message or user_message,
+                    "user_message": user_message
+                }
+            )
+        else:
+            user_message = get_message("generic_error", lang)
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "success": False,
+                    "error": result.error,
+                    "error_code": result.error,
+                    "message": result.message or user_message,
+                    "user_message": user_message
                 }
             )
     

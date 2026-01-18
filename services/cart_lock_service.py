@@ -453,7 +453,7 @@ def use_lock(
     return True, "", lock, False
 
 
-def extend_lock(db: Session, lock_token: str) -> ExtendLockResponse:
+def extend_lock(db: Session, lock_token: str, lang: str = "es") -> ExtendLockResponse:
     """
     Extend a cart lock by 5 minutes and re-reserve stock if lock was expired.
     
@@ -512,10 +512,11 @@ def extend_lock(db: Session, lock_token: str) -> ExtendLockResponse:
                 ))
         
         if unavailable_items:
+            # Message will be localized in the router based on lang
             return ExtendLockResponse(
                 success=False,
                 error="insufficient_stock",
-                message="Some items are no longer available",
+                message="Some items are no longer available",  # Technical message, user message will be localized in router
                 unavailable_items=unavailable_items
             )
         
