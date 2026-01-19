@@ -1418,22 +1418,28 @@ def _transform_address_to_tiktok_format(address_dict: Optional[dict], user: Opti
     if not address_dict:
         return None
     
-    # Get user info if available
-    first_name = None
-    last_name = None
-    full_name = None
-    phone_number = None
+    # Get name and contact info - priority: address_dict (from order) > user (from profile)
+    first_name = address_dict.get("first_name")
+    last_name = address_dict.get("last_name")
+    phone_number = address_dict.get("phone")
+    email = address_dict.get("email")
     
-    if user:
+    # Fallback to user if not in address_dict
+    if not first_name and user:
         first_name = user.first_name
+    if not last_name and user:
         last_name = user.last_name
-        if first_name and last_name:
-            full_name = f"{first_name} {last_name}"
-        elif first_name:
-            full_name = first_name
-        elif last_name:
-            full_name = last_name
+    if not phone_number and user:
         phone_number = user.phone or user.whatsapp_phone
+    
+    # Build full_name
+    full_name = None
+    if first_name and last_name:
+        full_name = f"{first_name} {last_name}"
+    elif first_name:
+        full_name = first_name
+    elif last_name:
+        full_name = last_name
     
     # Extract address components
     street = address_dict.get("street") or ""

@@ -316,8 +316,12 @@ def create_order(
     payment_method = cart.payment_method or "stripe"
     shipping_method = "pickup" if cart.is_pickup else "delivery"
     
-    # Build address from cart
+    # Build address from cart (include name, phone, email from checkout form)
     address_data = {
+        "first_name": cart.shipping_first_name or None,
+        "last_name": cart.shipping_last_name or None,
+        "phone": cart.shipping_phone or None,
+        "email": cart.shipping_email or None,
         "street": cart.shipping_street or "",
         "apartment": cart.shipping_apartment or "",
         "city": cart.shipping_city or "",
