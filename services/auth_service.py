@@ -9,11 +9,14 @@ from fastapi.security import OAuth2PasswordBearer
 from database import get_db
 from models import User, PasswordResetRequest
 from schemas.auth import UserCreate, UserUpdate, ResetPasswordSchema
-from config import SECRET_KEY, ALGORITHM, FRONTEND_RESET_URL, PASSWORD_RESET_MAX_REQUESTS_PER_HOUR
+from config import SECRET_KEY, ALGORITHM, FRONTEND_RESET_URL, PASSWORD_RESET_MAX_REQUESTS_PER_HOUR, get_store_config
 from utils import send_email
 from security import create_reset_token
 
 oauth2_scheme = None  # Defined in main auth.py for dependency injection
+
+# OAuth2 scheme that doesn't auto-error (for optional auth)
+oauth2_scheme_optional = OAuth2PasswordBearer(tokenUrl="/login", auto_error=False)
 
 
 def get_password_hash(password: str) -> str:
@@ -47,38 +50,142 @@ def create_access_token(data: dict, expires_delta: timedelta = None):
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/login")
 
-def get_current_user(db: Session = Depends(get_db), token: str = Depends(oauth2_scheme)):
+
+def _validate_token_and_get_user(db: Session, token: str, raise_on_error: bool = True):
+    """
+    Internal helper to validate token and return user.
+    
+    Args:
+        db: Database session
+        token: JWT token string
+        raise_on_error: If True, raises HTTPException on invalid token. If False, returns None.
+    
+    Returns:
+        User object if valid, None if invalid and raise_on_error=False
+    
+    Raises:
+        HTTPException 401/403 if invalid and raise_on_error=True
+    """
     credentials_exception = HTTPException(
         status_code=401,
         detail="Invalid token",
         headers={"WWW-Authenticate": "Bearer"},
     )
+    
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         identifier = payload.get("sub")
         if not identifier:
-            raise credentials_exception
+            if raise_on_error:
+                raise credentials_exception
+            return None
     except JWTError:
-        raise credentials_exception
+        if raise_on_error:
+            raise credentials_exception
+        return None
+    
     user = get_user_by_email_or_phone(db, identifier)
     if not user:
-        raise credentials_exception
+        if raise_on_error:
+            raise credentials_exception
+        return None
     
     # Check if user is blocked
     if user.is_blocked:
-        raise HTTPException(
-            status_code=403, 
-            detail="Your account has been blocked. Please contact support."
-        )
+        if raise_on_error:
+            raise HTTPException(
+                status_code=403, 
+                detail="Your account has been blocked. Please contact support."
+            )
+        return None
     
     # Check if user is suspended
     if user.is_suspended:
-        raise HTTPException(
-            status_code=403, 
-            detail="Your account has been temporarily suspended. Please contact support."
-        )
+        if raise_on_error:
+            raise HTTPException(
+                status_code=403, 
+                detail="Your account has been temporarily suspended. Please contact support."
+            )
+        return None
     
     return user
+
+
+def get_current_user(db: Session = Depends(get_db), token: str = Depends(oauth2_scheme)):
+    """
+    Requires authentication. Raises 401 if not authenticated.
+    Use for endpoints that require a logged-in user.
+    """
+    return _validate_token_and_get_user(db, token, raise_on_error=True)
+
+
+def get_optional_user(
+    db: Session = Depends(get_db), 
+    token: str = Depends(oauth2_scheme_optional)
+):
+    """
+    Returns User if authenticated, None if not.
+    Does NOT raise an exception for missing/invalid tokens.
+    Use this for endpoints that work for both guests and logged-in users.
+    """
+    if not token:
+        return None
+    return _validate_token_and_get_user(db, token, raise_on_error=False)
+
+
+def get_catalog_user(
+    db: Session = Depends(get_db),
+    token: str = Depends(oauth2_scheme_optional)
+):
+    """
+    Smart dependency for catalog endpoints (products, categories, brands).
+    - Wholesale mode: requires authentication (raises 401 if not logged in)
+    - Retail mode: returns User if logged in, None if guest
+    """
+    config = get_store_config()
+    
+    if config["require_auth_for_catalog"]:
+        # Wholesale: must be authenticated
+        if not token:
+            raise HTTPException(
+                status_code=401,
+                detail="Authentication required to view catalog",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        return _validate_token_and_get_user(db, token, raise_on_error=True)
+    else:
+        # Retail: optional auth
+        if not token:
+            return None
+        return _validate_token_and_get_user(db, token, raise_on_error=False)
+
+
+def get_cart_user(
+    db: Session = Depends(get_db),
+    token: str = Depends(oauth2_scheme_optional)
+):
+    """
+    Smart dependency for cart endpoints.
+    - Wholesale mode: requires authentication
+    - Retail mode: returns User if logged in, None if guest (uses session_id)
+    """
+    config = get_store_config()
+    
+    if config["require_auth_for_cart"]:
+        # Wholesale: must be authenticated
+        if not token:
+            raise HTTPException(
+                status_code=401,
+                detail="Authentication required to manage cart",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        return _validate_token_and_get_user(db, token, raise_on_error=True)
+    else:
+        # Retail: optional auth
+        if not token:
+            return None
+        return _validate_token_and_get_user(db, token, raise_on_error=False)
+
 
 def get_user_by_email_or_phone(db: Session, identifier: str):
     """Find user by email, phone, or whatsapp_phone"""

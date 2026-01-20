@@ -2,16 +2,13 @@
 Cart router for shopping cart endpoints
 """
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
-from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
-from sqlalchemy import or_
 from typing import Optional
-from jose import jwt, JWTError
 
 from database import get_db
 from models import User
-from services import cart_service
-from config import SECRET_KEY, ALGORITHM
+from services import cart_service, auth_service
+from config import get_store_config
 from schemas.cart import (
     CartResponse, CartItemCreate, CartItemUpdate,
     AddItemResponse, UpdateItemResponse, DeleteItemResponse,
@@ -27,49 +24,10 @@ from utils.messages import get_message
 
 router = APIRouter(prefix="/cart", tags=["Cart"])
 
-# Optional OAuth2 scheme (doesn't auto-raise 401)
-oauth2_scheme_optional = OAuth2PasswordBearer(tokenUrl="/login", auto_error=False)
-
 
 def get_session_id(x_session_id: Optional[str] = Header(None, alias="X-Session-ID")) -> Optional[str]:
     """Extract session ID from header"""
     return x_session_id
-
-
-def get_optional_user(
-    db: Session = Depends(get_db),
-    token: Optional[str] = Depends(oauth2_scheme_optional)
-) -> Optional[User]:
-    """Get user if authenticated, None otherwise (no error if not authenticated)"""
-    if not token:
-        return None
-    
-    try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        identifier = payload.get("sub")
-        if not identifier:
-            return None
-        
-        # Find user by email, phone, or whatsapp_phone
-        user = db.query(User).filter(
-            or_(
-                User.email == identifier,
-                User.phone == identifier,
-                User.whatsapp_phone == identifier
-            )
-        ).first()
-        
-        if not user:
-            return None
-        
-        if user.is_blocked or user.is_suspended:
-            return None
-        
-        return user
-    except JWTError:
-        return None
-    except Exception:
-        return None
 
 
 # ---------- Cart Endpoints ----------
@@ -82,20 +40,27 @@ def get_optional_user(
     Get the current shopping cart with all items.
     
     **Headers:**
-    - `X-Session-ID`: Required for guest users, optional for authenticated users
-    - `Authorization`: Bearer token (optional)
+    - `X-Session-ID`: Required for guest users (retail mode only)
+    - `Authorization`: Bearer token (required in wholesale, optional in retail)
     - `Accept-Language`: `en` for English, `es` for Spanish (default)
+    
+    **Authentication:**
+    - Wholesale mode: Requires authentication
+    - Retail mode: Guest users can use X-Session-ID header
     
     Returns cart with items, totals, and any stock warnings.
     """
 )
 def get_cart(
     session_id: Optional[str] = Depends(get_session_id),
-    user: Optional[User] = Depends(get_optional_user),
+    user: Optional[User] = Depends(auth_service.get_cart_user),
     db: Session = Depends(get_db),
     accept_language: Optional[str] = Header(None, alias="Accept-Language")
 ):
-    if not session_id and not user:
+    # In wholesale mode, user is guaranteed (get_cart_user raises 401 if not)
+    # In retail mode, user might be None (guest), so we need session_id
+    config = get_store_config()
+    if not config["require_auth_for_cart"] and not session_id and not user:
         raise HTTPException(
             status_code=400,
             detail="X-Session-ID header is required for guest users"
@@ -113,8 +78,8 @@ def get_cart(
     Add a product to the shopping cart.
     
     **Headers:**
-    - `X-Session-ID`: Required for guest users
-    - `Authorization`: Bearer token (optional)
+    - `X-Session-ID`: Required for guest users (retail mode only)
+    - `Authorization`: Bearer token (required in wholesale, optional in retail)
     
     **Body:**
     - `product_id`: ID of the product to add
@@ -130,10 +95,11 @@ def get_cart(
 def add_item(
     data: CartItemCreate,
     session_id: Optional[str] = Depends(get_session_id),
-    user: Optional[User] = Depends(get_optional_user),
+    user: Optional[User] = Depends(auth_service.get_cart_user),
     db: Session = Depends(get_db)
 ):
-    if not session_id and not user:
+    config = get_store_config()
+    if not config["require_auth_for_cart"] and not session_id and not user:
         raise HTTPException(
             status_code=400,
             detail="X-Session-ID header is required for guest users"
@@ -150,8 +116,8 @@ def add_item(
     Update the quantity of an item in the cart.
     
     **Headers:**
-    - `X-Session-ID`: Required for guest users
-    - `Authorization`: Bearer token (optional)
+    - `X-Session-ID`: Required for guest users (retail mode only)
+    - `Authorization`: Bearer token (required in wholesale, optional in retail)
     
     **Body:**
     - `quantity`: New quantity (must be >= 1)
@@ -161,10 +127,11 @@ def update_item(
     item_id: int,
     data: CartItemUpdate,
     session_id: Optional[str] = Depends(get_session_id),
-    user: Optional[User] = Depends(get_optional_user),
+    user: Optional[User] = Depends(auth_service.get_cart_user),
     db: Session = Depends(get_db)
 ):
-    if not session_id and not user:
+    config = get_store_config()
+    if not config["require_auth_for_cart"] and not session_id and not user:
         raise HTTPException(
             status_code=400,
             detail="X-Session-ID header is required for guest users"
@@ -181,17 +148,18 @@ def update_item(
     Remove an item from the shopping cart.
     
     **Headers:**
-    - `X-Session-ID`: Required for guest users
-    - `Authorization`: Bearer token (optional)
+    - `X-Session-ID`: Required for guest users (retail mode only)
+    - `Authorization`: Bearer token (required in wholesale, optional in retail)
     """
 )
 def remove_item(
     item_id: int,
     session_id: Optional[str] = Depends(get_session_id),
-    user: Optional[User] = Depends(get_optional_user),
+    user: Optional[User] = Depends(auth_service.get_cart_user),
     db: Session = Depends(get_db)
 ):
-    if not session_id and not user:
+    config = get_store_config()
+    if not config["require_auth_for_cart"] and not session_id and not user:
         raise HTTPException(
             status_code=400,
             detail="X-Session-ID header is required for guest users"
@@ -208,16 +176,17 @@ def remove_item(
     Remove all items from the shopping cart.
     
     **Headers:**
-    - `X-Session-ID`: Required for guest users
-    - `Authorization`: Bearer token (optional)
+    - `X-Session-ID`: Required for guest users (retail mode only)
+    - `Authorization`: Bearer token (required in wholesale, optional in retail)
     """
 )
 def clear_cart(
     session_id: Optional[str] = Depends(get_session_id),
-    user: Optional[User] = Depends(get_optional_user),
+    user: Optional[User] = Depends(auth_service.get_cart_user),
     db: Session = Depends(get_db)
 ):
-    if not session_id and not user:
+    config = get_store_config()
+    if not config["require_auth_for_cart"] and not session_id and not user:
         raise HTTPException(
             status_code=400,
             detail="X-Session-ID header is required for guest users"
@@ -242,19 +211,15 @@ def clear_cart(
     - If user has no cart, guest cart is assigned to user
     - If user has cart, items are merged (higher quantity wins)
     - Guest cart is deleted after merge
+    
+    **Note:** This endpoint always requires authentication (both modes).
     """
 )
 def merge_carts(
     session_id: Optional[str] = Depends(get_session_id),
-    user: Optional[User] = Depends(get_optional_user),
+    user: User = Depends(auth_service.get_current_user),
     db: Session = Depends(get_db)
 ):
-    if not user:
-        raise HTTPException(
-            status_code=401,
-            detail="Authentication required to merge carts"
-        )
-    
     if not session_id:
         raise HTTPException(
             status_code=400,
@@ -272,16 +237,17 @@ def merge_carts(
     Returns validation result and any stock errors that must be resolved.
     
     **Headers:**
-    - `X-Session-ID`: Required for guest users
-    - `Authorization`: Bearer token (optional)
+    - `X-Session-ID`: Required for guest users (retail mode only)
+    - `Authorization`: Bearer token (required in wholesale, optional in retail)
     """
 )
 def validate_cart(
     session_id: Optional[str] = Depends(get_session_id),
-    user: Optional[User] = Depends(get_optional_user),
+    user: Optional[User] = Depends(auth_service.get_cart_user),
     db: Session = Depends(get_db)
 ):
-    if not session_id and not user:
+    config = get_store_config()
+    if not config["require_auth_for_cart"] and not session_id and not user:
         raise HTTPException(
             status_code=400,
             detail="X-Session-ID header is required for guest users"
@@ -310,8 +276,8 @@ def validate_cart(
     - Excludes products already in the cart
     
     **Headers:**
-    - `X-Session-ID`: Required for guest users
-    - `Authorization`: Bearer token (optional)
+    - `X-Session-ID`: Required for guest users (retail mode only)
+    - `Authorization`: Bearer token (required in wholesale, optional in retail)
     
     **Query Parameters:**
     - `limit`: Maximum number of recommendations (default: 10, max: 20)
@@ -324,10 +290,11 @@ def validate_cart(
 def get_recommendations(
     limit: int = 10,
     session_id: Optional[str] = Depends(get_session_id),
-    user: Optional[User] = Depends(get_optional_user),
+    user: Optional[User] = Depends(auth_service.get_cart_user),
     db: Session = Depends(get_db)
 ):
-    if not session_id and not user:
+    config = get_store_config()
+    if not config["require_auth_for_cart"] and not session_id and not user:
         raise HTTPException(
             status_code=400,
             detail="X-Session-ID header is required for guest users"
@@ -350,8 +317,8 @@ def get_recommendations(
     Once saved, tax will be calculated automatically on GET /cart.
     
     **Headers:**
-    - `X-Session-ID`: Required for guest users
-    - `Authorization`: Bearer token (optional)
+    - `X-Session-ID`: Required for guest users (retail mode only)
+    - `Authorization`: Bearer token (required in wholesale, optional in retail)
     
     **Fields:**
     - `street`: Street address (optional)
@@ -364,10 +331,11 @@ def get_recommendations(
 def update_shipping_address(
     data: UpdateShippingRequest,
     session_id: Optional[str] = Depends(get_session_id),
-    user: Optional[User] = Depends(get_optional_user),
+    user: Optional[User] = Depends(auth_service.get_cart_user),
     db: Session = Depends(get_db)
 ):
-    if not session_id and not user:
+    config = get_store_config()
+    if not config["require_auth_for_cart"] and not session_id and not user:
         raise HTTPException(
             status_code=400,
             detail="X-Session-ID header is required for guest users"
@@ -385,16 +353,17 @@ def update_shipping_address(
     Tax will return to 0 on subsequent GET /cart calls.
     
     **Headers:**
-    - `X-Session-ID`: Required for guest users
-    - `Authorization`: Bearer token (optional)
+    - `X-Session-ID`: Required for guest users (retail mode only)
+    - `Authorization`: Bearer token (required in wholesale, optional in retail)
     """
 )
 def delete_shipping_address(
     session_id: Optional[str] = Depends(get_session_id),
-    user: Optional[User] = Depends(get_optional_user),
+    user: Optional[User] = Depends(auth_service.get_cart_user),
     db: Session = Depends(get_db)
 ):
-    if not session_id and not user:
+    config = get_store_config()
+    if not config["require_auth_for_cart"] and not session_id and not user:
         raise HTTPException(
             status_code=400,
             detail="X-Session-ID header is required for guest users"
@@ -414,20 +383,21 @@ def delete_shipping_address(
     Must be called before creating a lock.
     
     **Headers:**
-    - `X-Session-ID`: Required for guest users
-    - `Authorization`: Bearer token (optional)
+    - `X-Session-ID`: Required for guest users (retail mode only)
+    - `Authorization`: Bearer token (required in wholesale, optional in retail)
     
     **Body:**
-    - `payment_method`: "stripe" or "zelle"
+    - `payment_method`: "stripe" or "zelle" (zelle only available in wholesale mode)
     """
 )
 def update_payment_method(
     data: UpdatePaymentMethodRequest,
     session_id: Optional[str] = Depends(get_session_id),
-    user: Optional[User] = Depends(get_optional_user),
+    user: Optional[User] = Depends(auth_service.get_cart_user),
     db: Session = Depends(get_db)
 ):
-    if not session_id and not user:
+    config = get_store_config()
+    if not config["require_auth_for_cart"] and not session_id and not user:
         raise HTTPException(
             status_code=400,
             detail="X-Session-ID header is required for guest users"
@@ -459,16 +429,17 @@ def update_payment_method(
     - Cancels any previous active lock for this cart
     
     **Headers:**
-    - `X-Session-ID`: Required for guest users
-    - `Authorization`: Bearer token (optional)
+    - `X-Session-ID`: Required for guest users (retail mode only)
+    - `Authorization`: Bearer token (required in wholesale, optional in retail)
     """
 )
 def create_lock(
     session_id: Optional[str] = Depends(get_session_id),
-    user: Optional[User] = Depends(get_optional_user),
+    user: Optional[User] = Depends(auth_service.get_cart_user),
     db: Session = Depends(get_db)
 ):
-    if not session_id and not user:
+    config = get_store_config()
+    if not config["require_auth_for_cart"] and not session_id and not user:
         raise HTTPException(
             status_code=400,
             detail="X-Session-ID header is required for guest users"
@@ -509,7 +480,7 @@ def create_lock(
 def release_lock(
     data: ReleaseLockRequest,
     session_id: Optional[str] = Depends(get_session_id),
-    user: Optional[User] = Depends(get_optional_user),
+    user: Optional[User] = Depends(auth_service.get_optional_user),
     db: Session = Depends(get_db)
 ):
     return cart_lock_service.release_lock(db, data.lock_token)

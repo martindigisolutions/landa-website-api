@@ -26,12 +26,14 @@ router = APIRouter()
     
     **Localization:** Send `Accept-Language: en` header for English, 
     or `Accept-Language: es` for Spanish (default).
+    
+    **Authentication:** Required in wholesale mode, optional in retail mode.
     """,
     response_model=List[CategoryGroupPublic]
 )
 def get_categories(
-    current_user: User = Depends(auth_service.get_current_user),
     db: Session = Depends(get_db),
+    current_user: Optional[User] = Depends(auth_service.get_catalog_user),
     accept_language: Optional[str] = Header(None, alias="Accept-Language")
 ):
     lang = get_language_from_header(accept_language)
@@ -63,12 +65,14 @@ def get_categories(
     - `newest`: Sort by creation date descending
     - `bestseller`: Sort by bestseller_order (products with order > 0, then by position)
     - `recommended`: Sort by recommended_order (products with order > 0, then by position)
+    
+    **Authentication:** Required in wholesale mode, optional in retail mode.
     """,
     response_model=PaginatedProductResponse
 )
 def get_products(
-    current_user: User = Depends(auth_service.get_current_user),
     db: Session = Depends(get_db),
+    current_user: Optional[User] = Depends(auth_service.get_catalog_user),
     accept_language: Optional[str] = Header(None, alias="Accept-Language"),
     search: Optional[str] = Query(None, description="Search by name, title, tags, or brand"),
     brand: Optional[List[str]] = Query(None, description="Filter by brand(s). Can be repeated for multiple brands."),
@@ -110,13 +114,15 @@ def get_products(
     
     **Localization:** Send `Accept-Language: en` header for English, 
     or `Accept-Language: es` for Spanish (default).
+    
+    **Authentication:** Required in wholesale mode, optional in retail mode.
     """,
     response_model=ProductPublic
 )
 def get_product_by_id(
     product_id: int,
-    current_user: User = Depends(auth_service.get_current_user),
     db: Session = Depends(get_db),
+    current_user: Optional[User] = Depends(auth_service.get_catalog_user),
     accept_language: Optional[str] = Header(None, alias="Accept-Language")
 ):
     lang = get_language_from_header(accept_language)
@@ -126,12 +132,16 @@ def get_product_by_id(
 @router.get(
     "/brands",
     summary="Get list of available brands",
-    description="Returns a list of unique product brands available in the catalog, ordered alphabetically.",
+    description="""
+    Returns a list of unique product brands available in the catalog, ordered alphabetically.
+    
+    **Authentication:** Required in wholesale mode, optional in retail mode.
+    """,
     response_model=List[str]
 )
 def get_brands(
-    current_user: User = Depends(auth_service.get_current_user),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: Optional[User] = Depends(auth_service.get_catalog_user)
 ):
     return product_service.get_brands(db)
 
