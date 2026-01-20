@@ -17,7 +17,8 @@ from database import get_db
 from models import (
     Application, Product, ProductVariantGroup, ProductVariant, 
     Order, OrderItem, OrderShipment, User, SingleAccessToken,
-    CategoryGroup, Category, ProductCategory, ShippingRule, CombinedOrder
+    CategoryGroup, Category, ProductCategory, ShippingRule, CombinedOrder,
+    RegistrationRequest
 )
 from schemas.admin import (
     ApplicationCreate, ApplicationUpdate, ApplicationResponse, ApplicationCreatedResponse,
@@ -47,7 +48,12 @@ from schemas.admin import (
     VariantInventoryUpdateResponse, VariantInventoryBulkUpdateResponse, VariantInventoryBulkUpdateError,
     InventoryItem, InventoryListResponse,
     InventoryUnifiedUpdate, InventoryUnifiedUpdateResponse,
-    InventoryUnifiedUpdateResult, InventoryUnifiedUpdateError
+    InventoryUnifiedUpdateResult, InventoryUnifiedUpdateError,
+    # Registration Request schemas
+    RegistrationRequestResponse, PaginatedRegistrationRequestsResponse,
+    RegistrationRequestStatsResponse, RegistrationRequestApproveRequest,
+    RegistrationRequestRejectRequest, RegistrationRequestApproveResponse,
+    RegistrationRequestRejectResponse, RegistrationRequestReviewerResponse
 )
 from config import SECRET_KEY, ALGORITHM, WHOLESALE_FRONTEND_URL, SINGLE_ACCESS_TOKEN_EXPIRE_HOURS
 
@@ -3551,5 +3557,219 @@ def get_combined_orders(combined_group_id: str, db: Session) -> CombinedOrdersRe
         combined_group_id=combined_group_id,
         orders=order_responses,
         shared_shipments=shipment_responses
+    )
+
+
+# ==================== REGISTRATION REQUESTS MANAGEMENT ====================
+
+def _registration_request_to_response(request: RegistrationRequest, db: Session) -> RegistrationRequestResponse:
+    """Convert a RegistrationRequest model to a response schema"""
+    reviewed_by = None
+    if request.reviewed_by_id:
+        reviewer = db.query(User).filter(User.id == request.reviewed_by_id).first()
+        if reviewer:
+            reviewed_by = RegistrationRequestReviewerResponse(
+                id=reviewer.id,
+                first_name=reviewer.first_name,
+                last_name=reviewer.last_name
+            )
+    
+    return RegistrationRequestResponse(
+        id=request.id,
+        request_code=request.request_code,
+        first_name=request.first_name,
+        last_name=request.last_name,
+        email=request.email,
+        phone=request.phone,
+        whatsapp_phone=request.whatsapp_phone,
+        birthdate=request.birthdate,
+        estimated_monthly_purchase=request.estimated_monthly_purchase,
+        notes=request.notes,
+        business_types=request.business_types or [],
+        services_offered=request.services_offered or [],
+        frequent_products=request.frequent_products or [],
+        team_size=request.team_size,
+        status=request.status,
+        created_at=request.created_at,
+        reviewed_at=request.reviewed_at,
+        reviewed_by=reviewed_by,
+        rejection_reason=request.rejection_reason,
+        user_id=request.user_id
+    )
+
+
+def get_registration_request_stats(db: Session) -> RegistrationRequestStatsResponse:
+    """Get counts of registration requests by status"""
+    pending = db.query(func.count(RegistrationRequest.id)).filter(
+        RegistrationRequest.status == "pending"
+    ).scalar() or 0
+    
+    approved = db.query(func.count(RegistrationRequest.id)).filter(
+        RegistrationRequest.status == "approved"
+    ).scalar() or 0
+    
+    rejected = db.query(func.count(RegistrationRequest.id)).filter(
+        RegistrationRequest.status == "rejected"
+    ).scalar() or 0
+    
+    return RegistrationRequestStatsResponse(
+        pending=pending,
+        approved=approved,
+        rejected=rejected,
+        total=pending + approved + rejected
+    )
+
+
+def list_registration_requests(
+    db: Session,
+    status: Optional[str] = None,
+    page: int = 1,
+    page_size: int = 20
+) -> PaginatedRegistrationRequestsResponse:
+    """List registration requests with optional status filter"""
+    query = db.query(RegistrationRequest)
+    
+    if status:
+        if status not in ["pending", "approved", "rejected"]:
+            raise HTTPException(status_code=400, detail="Invalid status. Must be: pending, approved, or rejected")
+        query = query.filter(RegistrationRequest.status == status)
+    
+    # Order by created_at descending (newest first)
+    query = query.order_by(RegistrationRequest.created_at.desc())
+    
+    # Get total count
+    total = query.count()
+    total_pages = (total + page_size - 1) // page_size
+    
+    # Paginate
+    requests = query.offset((page - 1) * page_size).limit(page_size).all()
+    
+    return PaginatedRegistrationRequestsResponse(
+        total=total,
+        page=page,
+        page_size=page_size,
+        total_pages=total_pages,
+        results=[_registration_request_to_response(r, db) for r in requests]
+    )
+
+
+def get_registration_request(request_id: int, db: Session) -> RegistrationRequestResponse:
+    """Get a specific registration request by ID"""
+    request = db.query(RegistrationRequest).filter(RegistrationRequest.id == request_id).first()
+    if not request:
+        raise HTTPException(status_code=404, detail="Registration request not found")
+    
+    return _registration_request_to_response(request, db)
+
+
+def approve_registration_request(
+    request_id: int,
+    data: RegistrationRequestApproveRequest,
+    db: Session
+) -> RegistrationRequestApproveResponse:
+    """Approve a registration request and create the user"""
+    request = db.query(RegistrationRequest).filter(RegistrationRequest.id == request_id).first()
+    if not request:
+        raise HTTPException(status_code=404, detail="Registration request not found")
+    
+    if request.status != "pending":
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot approve request. Current status is '{request.status}'"
+        )
+    
+    # Check if email or phone already exists in users
+    existing_user = db.query(User).filter(
+        (User.email == request.email) | (User.phone == request.phone)
+    ).first()
+    
+    if existing_user:
+        raise HTTPException(
+            status_code=409,
+            detail="A user with this email or phone already exists"
+        )
+    
+    # Create the user
+    new_user = User(
+        first_name=request.first_name,
+        last_name=request.last_name,
+        phone=request.phone,
+        whatsapp_phone=request.whatsapp_phone,
+        email=request.email,
+        birthdate=request.birthdate,
+        user_type="stylist",  # Wholesale users are stylists
+        registration_complete=True,
+        hashed_password=request.hashed_password,  # Use the stored hashed password
+        password_last_updated=datetime.utcnow(),
+        password_requires_update=False
+    )
+    db.add(new_user)
+    db.flush()  # Get the user ID
+    
+    # Update the request
+    request.status = "approved"
+    request.reviewed_at = datetime.utcnow()
+    request.user_id = new_user.id
+    # Note: reviewed_by_id should be set if we have the admin user ID
+    # For now, we skip it since OAuth2 apps don't have a user context
+    
+    db.commit()
+    db.refresh(request)
+    db.refresh(new_user)
+    
+    # TODO: Send notification email if data.send_notification is True
+    
+    user_response = UserAdminResponse(
+        id=new_user.id,
+        first_name=new_user.first_name,
+        last_name=new_user.last_name,
+        email=new_user.email,
+        phone=new_user.phone,
+        whatsapp_phone=new_user.whatsapp_phone,
+        birthdate=new_user.birthdate,
+        user_type=new_user.user_type,
+        registration_complete=new_user.registration_complete,
+        created_at=new_user.created_at
+    )
+    
+    return RegistrationRequestApproveResponse(
+        success=True,
+        message="Solicitud aprobada. Usuario creado.",
+        user=user_response,
+        request=_registration_request_to_response(request, db)
+    )
+
+
+def reject_registration_request(
+    request_id: int,
+    data: RegistrationRequestRejectRequest,
+    db: Session
+) -> RegistrationRequestRejectResponse:
+    """Reject a registration request with a reason"""
+    request = db.query(RegistrationRequest).filter(RegistrationRequest.id == request_id).first()
+    if not request:
+        raise HTTPException(status_code=404, detail="Registration request not found")
+    
+    if request.status != "pending":
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot reject request. Current status is '{request.status}'"
+        )
+    
+    # Update the request
+    request.status = "rejected"
+    request.reviewed_at = datetime.utcnow()
+    request.rejection_reason = data.reason
+    # Note: reviewed_by_id should be set if we have the admin user ID
+    
+    db.commit()
+    db.refresh(request)
+    
+    # TODO: Send notification email if data.send_notification is True
+    
+    return RegistrationRequestRejectResponse(
+        success=True,
+        message="Solicitud rechazada.",
+        request=_registration_request_to_response(request, db)
     )
 

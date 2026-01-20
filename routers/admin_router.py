@@ -29,7 +29,12 @@ from schemas.admin import (
     InventoryUpdateResponse, InventoryBulkUpdateResponse,
     VariantInventoryUpdateSingle, VariantInventoryBulkUpdate,
     VariantInventoryUpdateResponse, VariantInventoryBulkUpdateResponse,
-    InventoryListResponse, InventoryUnifiedUpdate, InventoryUnifiedUpdateResponse
+    InventoryListResponse, InventoryUnifiedUpdate, InventoryUnifiedUpdateResponse,
+    # Registration Request schemas
+    RegistrationRequestResponse, PaginatedRegistrationRequestsResponse,
+    RegistrationRequestStatsResponse, RegistrationRequestApproveRequest,
+    RegistrationRequestRejectRequest, RegistrationRequestApproveResponse,
+    RegistrationRequestRejectResponse
 )
 from schemas.product import ProductSchema
 from schemas.settings import (
@@ -1357,3 +1362,79 @@ def cleanup_activities(
         older_than_days=older_than_days,
         dry_run=dry_run
     )
+
+
+# ==================== REGISTRATION REQUESTS MANAGEMENT (Wholesale) ====================
+# These endpoints require users:read or users:write scope
+
+@router.get(
+    "/registration-requests/stats",
+    response_model=RegistrationRequestStatsResponse,
+    summary="Get registration request stats",
+    description="Get counts of registration requests by status."
+)
+def get_registration_request_stats(
+    app=Depends(admin_service.require_scope("users:read")),
+    db: Session = Depends(get_db)
+):
+    return admin_service.get_registration_request_stats(db)
+
+
+@router.get(
+    "/registration-requests",
+    response_model=PaginatedRegistrationRequestsResponse,
+    summary="List registration requests",
+    description="Get a paginated list of registration requests with optional status filter."
+)
+def list_registration_requests(
+    status: Optional[str] = Query(None, description="Filter by status: pending, approved, rejected"),
+    page: int = Query(1, ge=1, description="Page number"),
+    page_size: int = Query(20, ge=1, le=100, description="Items per page"),
+    app=Depends(admin_service.require_scope("users:read")),
+    db: Session = Depends(get_db)
+):
+    return admin_service.list_registration_requests(db, status, page, page_size)
+
+
+@router.get(
+    "/registration-requests/{request_id}",
+    response_model=RegistrationRequestResponse,
+    summary="Get registration request details",
+    description="Get full details of a specific registration request."
+)
+def get_registration_request(
+    request_id: int,
+    app=Depends(admin_service.require_scope("users:read")),
+    db: Session = Depends(get_db)
+):
+    return admin_service.get_registration_request(request_id, db)
+
+
+@router.post(
+    "/registration-requests/{request_id}/approve",
+    response_model=RegistrationRequestApproveResponse,
+    summary="Approve registration request",
+    description="Approve a pending registration request. Creates a new user from the request data."
+)
+def approve_registration_request(
+    request_id: int,
+    data: RegistrationRequestApproveRequest = RegistrationRequestApproveRequest(),
+    app=Depends(admin_service.require_scope("users:write")),
+    db: Session = Depends(get_db)
+):
+    return admin_service.approve_registration_request(request_id, data, db)
+
+
+@router.post(
+    "/registration-requests/{request_id}/reject",
+    response_model=RegistrationRequestRejectResponse,
+    summary="Reject registration request",
+    description="Reject a pending registration request with a reason."
+)
+def reject_registration_request(
+    request_id: int,
+    data: RegistrationRequestRejectRequest,
+    app=Depends(admin_service.require_scope("users:write")),
+    db: Session = Depends(get_db)
+):
+    return admin_service.reject_registration_request(request_id, data, db)

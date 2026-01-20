@@ -1082,3 +1082,84 @@ class PaginatedCartsResponse(BaseModel):
     """Paginated response for carts"""
     results: List[CartListItemResponse]
     pagination: dict
+
+
+# ---------- Registration Request Schemas (Wholesale) ----------
+
+class RegistrationRequestReviewerResponse(BaseModel):
+    """Reviewer info for registration request"""
+    id: int
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+
+
+class RegistrationRequestResponse(BaseModel):
+    """Response for a registration request"""
+    id: int
+    request_code: str  # Public code like REQ-X7K9M2
+    first_name: str
+    last_name: str
+    email: str
+    phone: str
+    whatsapp_phone: Optional[str] = None
+    birthdate: Optional[date] = None
+    estimated_monthly_purchase: Optional[float] = None
+    notes: Optional[str] = None
+    # Business profile
+    business_types: List[str] = []  # ["independent_stylist", "salon", "barbershop", "student", "distributor", "other"]
+    services_offered: List[str] = []  # ["coloring", "bleaching", "straightening", "treatments", "cuts_styling", "other"]
+    frequent_products: List[str] = []  # ["dyes", "peroxides", "bleaches", "treatments", "professional_shampoo"]
+    team_size: Optional[str] = None  # "solo", "2-3", "4-6", "7+"
+    # Status
+    status: str  # pending, approved, rejected
+    created_at: datetime
+    reviewed_at: Optional[datetime] = None
+    reviewed_by: Optional[RegistrationRequestReviewerResponse] = None
+    rejection_reason: Optional[str] = None
+    user_id: Optional[int] = None
+
+    class Config:
+        from_attributes = True
+
+
+class PaginatedRegistrationRequestsResponse(BaseModel):
+    """Paginated response for registration requests"""
+    total: int
+    page: int
+    page_size: int
+    total_pages: int
+    results: List[RegistrationRequestResponse]
+
+
+class RegistrationRequestStatsResponse(BaseModel):
+    """Stats for registration requests"""
+    pending: int
+    approved: int
+    rejected: int
+    total: int
+
+
+class RegistrationRequestApproveRequest(BaseModel):
+    """Request to approve a registration request"""
+    send_notification: bool = True
+
+
+class RegistrationRequestRejectRequest(BaseModel):
+    """Request to reject a registration request"""
+    reason: str
+    send_notification: bool = True
+
+
+class RegistrationRequestApproveResponse(BaseModel):
+    """Response after approving a registration request"""
+    success: bool
+    message: str
+    user: Optional[UserAdminResponse] = None
+    request: RegistrationRequestResponse
+
+
+class RegistrationRequestRejectResponse(BaseModel):
+    """Response after rejecting a registration request"""
+    success: bool
+    message: str
+    request: RegistrationRequestResponse

@@ -602,3 +602,54 @@ class UserActivity(Base):
         Index('ix_user_activities_session_created', 'session_id', 'created_at'),
         Index('ix_user_activities_action_created', 'action_type', 'created_at'),
     )
+
+
+# ==================== REGISTRATION REQUEST (Wholesale) ====================
+
+class RegistrationRequest(Base):
+    """
+    Registration requests for wholesale mode.
+    Users apply to register, admin approves/rejects.
+    Once approved, a User record is created.
+    """
+    __tablename__ = "registration_requests"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    request_code = Column(String, unique=True, index=True, nullable=False)  # Public code like REQ-X7K9M2
+    
+    # Applicant data (same as User fields)
+    first_name = Column(String, nullable=False)
+    last_name = Column(String, nullable=False)
+    phone = Column(String, nullable=False)
+    whatsapp_phone = Column(String, nullable=True)
+    email = Column(String, nullable=False, index=True)
+    birthdate = Column(Date, nullable=True)
+    hashed_password = Column(String, nullable=False)  # Store hashed password for when approved
+    
+    # Business information (for wholesale evaluation)
+    estimated_monthly_purchase = Column(Float, nullable=True)  # Estimated monthly purchase amount
+    notes = Column(String, nullable=True)  # Additional notes from the applicant
+    
+    # Business profile (multiple choice fields stored as JSON arrays)
+    business_types = Column(JSON, default=list)  # ["independent_stylist", "salon", "barbershop", "student", "distributor", "other"]
+    services_offered = Column(JSON, default=list)  # ["coloring", "bleaching", "straightening", "treatments", "cuts_styling", "other"]
+    frequent_products = Column(JSON, default=list)  # ["dyes", "peroxides", "bleaches", "treatments", "professional_shampoo"]
+    team_size = Column(String, nullable=True)  # "solo", "2-3", "4-6", "7+"
+    
+    # Request status
+    status = Column(String, default="pending", index=True)  # pending, approved, rejected
+    
+    # Review information
+    reviewed_at = Column(DateTime, nullable=True)
+    reviewed_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)  # Admin who reviewed
+    rejection_reason = Column(String, nullable=True)
+    
+    # Reference to created user (when approved)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    
+    # Timestamps
+    created_at = Column(DateTime, default=datetime.utcnow)
+    
+    # Relationships
+    reviewed_by = relationship("User", foreign_keys=[reviewed_by_id], backref="reviewed_requests")
+    user = relationship("User", foreign_keys=[user_id], backref="registration_request")

@@ -16,6 +16,20 @@ class BaseUser(BaseModel):
 class UserCreate(BaseUser):
     password: str
     # Note: user_type is optional. If not provided, backend uses default from STORE_CONFIG
+    
+    # Business info (only used in wholesale registration)
+    estimated_monthly_purchase: Optional[float] = None  # Estimated monthly purchase amount (USD)
+    notes: Optional[str] = None  # Additional notes from the applicant
+    
+    # Business profile (multiple choice - only used in wholesale registration)
+    # business_types: ["independent_stylist", "salon", "barbershop", "student", "distributor", "other"]
+    business_types: Optional[list[str]] = None
+    # services_offered: ["coloring", "bleaching", "straightening", "treatments", "cuts_styling", "other"]
+    services_offered: Optional[list[str]] = None
+    # frequent_products: ["dyes", "peroxides", "bleaches", "treatments", "professional_shampoo"]
+    frequent_products: Optional[list[str]] = None
+    # team_size: "solo", "2-3", "4-6", "7+"
+    team_size: Optional[str] = None
 
 class UserUpdate(BaseModel):
     first_name: Optional[str] = None

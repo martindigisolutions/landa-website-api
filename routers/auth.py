@@ -14,13 +14,24 @@ router = APIRouter()
     summary="Register new user",
     description="""
     Creates a new user account with email, phone, and password.
-    Returns access token so user is logged in immediately after registration.
+    
+    **Behavior depends on store mode:**
+    
+    **Retail mode:**
+    - Creates user immediately
+    - Returns access token (user is logged in)
+    - Response: `{ access_token, token_type, user }`
+    
+    **Wholesale mode:**
+    - Creates a registration request (pending admin approval)
+    - Does NOT return token
+    - Response: `{ pending: true, request_id, message }`
+    - Admin must approve from dashboard before user can login
     
     **Note:** `user_type` is optional. If not provided, defaults to:
     - `stylist` in wholesale mode
     - `client` in retail mode
     """,
-    response_model=LoginResponse,
     status_code=201
 )
 def register(user: UserCreate, db: Session = Depends(get_db)):

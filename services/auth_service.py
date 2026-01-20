@@ -1,4 +1,6 @@
 from datetime import datetime, timedelta
+import secrets
+import string
 from fastapi import HTTPException, Depends
 from jose import jwt, JWTError
 import bcrypt
@@ -7,7 +9,7 @@ from sqlalchemy import or_
 from fastapi.security import OAuth2PasswordBearer
 
 from database import get_db
-from models import User, PasswordResetRequest
+from models import User, PasswordResetRequest, RegistrationRequest
 from schemas.auth import UserCreate, UserUpdate, ResetPasswordSchema
 from config import SECRET_KEY, ALGORITHM, FRONTEND_RESET_URL, PASSWORD_RESET_MAX_REQUESTS_PER_HOUR, get_store_config
 from utils import send_email
@@ -47,6 +49,26 @@ def create_access_token(data: dict, expires_delta: timedelta = None):
     expire = datetime.utcnow() + (expires_delta or timedelta(days=365))
     to_encode.update({"exp": expire})
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+
+
+def _generate_request_code(db: Session) -> str:
+    """Generate a unique request code like REQ-X7K9M2"""
+    chars = string.ascii_uppercase + string.digits
+    # Remove confusing characters (0, O, I, 1, L)
+    chars = chars.replace('0', '').replace('O', '').replace('I', '').replace('1', '').replace('L', '')
+    
+    for _ in range(10):  # Try up to 10 times
+        code = 'REQ-' + ''.join(secrets.choice(chars) for _ in range(6))
+        # Check if code already exists
+        existing = db.query(RegistrationRequest).filter(
+            RegistrationRequest.request_code == code
+        ).first()
+        if not existing:
+            return code
+    
+    # Fallback: use timestamp-based code
+    import time
+    return f"REQ-{int(time.time() * 1000) % 1000000:06d}"
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/login")
 
@@ -204,6 +226,16 @@ def authenticate_user(db: Session, identifier: str, password: str):
     return user
 
 def register_user(user: UserCreate, db: Session):
+    """
+    Register a new user.
+    
+    Behavior depends on STORE_MODE:
+    - Retail: Creates user immediately, returns access token
+    - Wholesale: Creates registration request, requires admin approval
+    """
+    from config import IS_RETAIL, IS_WHOLESALE
+    
+    # Check if email/phone already registered
     if get_user_by_email_or_phone(db, user.email) or get_user_by_email_or_phone(db, user.phone):
         raise HTTPException(status_code=400, detail="Email or phone already registered")
     
@@ -212,47 +244,116 @@ def register_user(user: UserCreate, db: Session):
         existing = db.query(User).filter(User.whatsapp_phone == user.whatsapp_phone).first()
         if existing:
             raise HTTPException(status_code=400, detail="WhatsApp phone already registered")
-
-    # Determine user_type: use provided value or default from STORE_CONFIG
+    
     config = get_store_config()
-    user_type = user.user_type if user.user_type else config["default_user_type"]
-    
     hashed = get_password_hash(user.password)
-    new_user = User(
-        first_name=user.first_name,
-        last_name=user.last_name,
-        phone=user.phone,
-        whatsapp_phone=user.whatsapp_phone,
-        email=user.email,
-        birthdate=user.birthdate,
-        user_type=user_type,
-        registration_complete=True,
-        hashed_password=hashed,
-        password_last_updated=datetime.utcnow(),
-        password_requires_update=False
-    )
-    db.add(new_user)
-    db.commit()
-    db.refresh(new_user)
     
-    # Generate access token so user is logged in immediately
-    identifier = new_user.email or new_user.phone or new_user.whatsapp_phone
-    access_token = create_access_token(data={"sub": identifier}, expires_delta=timedelta(days=365))
-    
-    return {
-        "access_token": access_token,
-        "token_type": "bearer",
-        "user": {
-            "id": new_user.id,
-            "first_name": new_user.first_name,
-            "last_name": new_user.last_name,
-            "email": new_user.email,
-            "phone": new_user.phone,
-            "whatsapp_phone": new_user.whatsapp_phone,
-            "user_type": new_user.user_type,
-            "registration_complete": new_user.registration_complete
+    # RETAIL MODE: Create user immediately
+    if IS_RETAIL:
+        user_type = user.user_type if user.user_type else config["default_user_type"]
+        
+        new_user = User(
+            first_name=user.first_name,
+            last_name=user.last_name,
+            phone=user.phone,
+            whatsapp_phone=user.whatsapp_phone,
+            email=user.email,
+            birthdate=user.birthdate,
+            user_type=user_type,
+            registration_complete=True,
+            hashed_password=hashed,
+            password_last_updated=datetime.utcnow(),
+            password_requires_update=False
+        )
+        db.add(new_user)
+        db.commit()
+        db.refresh(new_user)
+        
+        # Generate access token so user is logged in immediately
+        identifier = new_user.email or new_user.phone or new_user.whatsapp_phone
+        access_token = create_access_token(data={"sub": identifier}, expires_delta=timedelta(days=365))
+        
+        return {
+            "access_token": access_token,
+            "token_type": "bearer",
+            "user": {
+                "id": new_user.id,
+                "first_name": new_user.first_name,
+                "last_name": new_user.last_name,
+                "email": new_user.email,
+                "phone": new_user.phone,
+                "whatsapp_phone": new_user.whatsapp_phone,
+                "user_type": new_user.user_type,
+                "registration_complete": new_user.registration_complete
+            }
         }
-    }
+    
+    # WHOLESALE MODE: Create registration request (pending approval)
+    else:
+        # Validate required business profile fields for wholesale
+        missing_fields = []
+        if not user.estimated_monthly_purchase:
+            missing_fields.append("estimated_monthly_purchase")
+        if not user.business_types or len(user.business_types) == 0:
+            missing_fields.append("business_types")
+        if not user.services_offered or len(user.services_offered) == 0:
+            missing_fields.append("services_offered")
+        if not user.frequent_products or len(user.frequent_products) == 0:
+            missing_fields.append("frequent_products")
+        if not user.team_size:
+            missing_fields.append("team_size")
+        
+        if missing_fields:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Los siguientes campos son obligatorios: {', '.join(missing_fields)}"
+            )
+        
+        # Check if there's already a pending request with this email/phone
+        existing_request = db.query(RegistrationRequest).filter(
+            RegistrationRequest.status == "pending",
+            or_(
+                RegistrationRequest.email == user.email,
+                RegistrationRequest.phone == user.phone
+            )
+        ).first()
+        
+        if existing_request:
+            raise HTTPException(
+                status_code=400, 
+                detail="Ya existe una solicitud pendiente con este email o teléfono."
+            )
+        
+        # Generate unique request code
+        request_code = _generate_request_code(db)
+        
+        # Create registration request
+        request = RegistrationRequest(
+            request_code=request_code,
+            first_name=user.first_name,
+            last_name=user.last_name,
+            phone=user.phone,
+            whatsapp_phone=user.whatsapp_phone,
+            email=user.email,
+            birthdate=user.birthdate,
+            hashed_password=hashed,
+            estimated_monthly_purchase=user.estimated_monthly_purchase,
+            notes=user.notes,
+            business_types=user.business_types or [],
+            services_offered=user.services_offered or [],
+            frequent_products=user.frequent_products or [],
+            team_size=user.team_size,
+            status="pending"
+        )
+        db.add(request)
+        db.commit()
+        db.refresh(request)
+        
+        return {
+            "pending": True,
+            "request_code": request.request_code,
+            "message": "Tu solicitud ha sido recibida. Te notificaremos cuando sea aprobada."
+        }
 
 def update_user_profile(user_id: int, updates: UserUpdate, db: Session):
     user = db.query(User).filter(User.id == user_id).first()
