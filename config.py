@@ -59,3 +59,71 @@ ADMIN_CLIENT_SECRET = _get_secret("ADMIN_CLIENT_SECRET")
 # Single Access Token Configuration
 WHOLESALE_FRONTEND_URL = os.getenv("WHOLESALE_FRONTEND_URL", "https://wholesale.landabeautysupply.com")
 SINGLE_ACCESS_TOKEN_EXPIRE_HOURS = int(os.getenv("SINGLE_ACCESS_TOKEN_EXPIRE_HOURS", "24"))
+
+# =============================================================================
+# STORE MODE CONFIGURATION
+# =============================================================================
+# Determines which store mode this instance runs as.
+# Set via environment variable: STORE_MODE=wholesale or STORE_MODE=retail
+# Default: wholesale (maintains backward compatibility)
+
+STORE_MODE = os.getenv("STORE_MODE", "wholesale")
+
+# Store-specific configuration
+STORE_CONFIG = {
+    "wholesale": {
+        "name": "Landa Beauty Supply - Wholesale",
+        # Auth requirements
+        "require_auth_for_catalog": True,    # Must login to see products/prices
+        "require_auth_for_cart": True,       # Must login to add to cart
+        "require_auth_for_checkout": True,   # Must login to checkout
+        # Order settings
+        "min_order_amount": 100,             # Minimum order amount in USD
+        "payment_methods": ["stripe", "zelle"],
+        "allow_pickup": True,                # Store pickup available
+        # Features
+        "enable_order_combination": True,
+        "enable_single_access_tokens": True,
+        # Users
+        "default_user_type": "stylist",
+    },
+    "retail": {
+        "name": "Landa Beauty Supply - Retail",
+        # Auth requirements
+        "require_auth_for_catalog": False,   # Public catalog
+        "require_auth_for_cart": False,      # Guest can add to cart
+        "require_auth_for_checkout": True,   # TBD: might allow guest checkout
+        # Order settings
+        "min_order_amount": 0,               # No minimum
+        "payment_methods": ["stripe"],       # Stripe only
+        "allow_pickup": False,               # Delivery only
+        # Features
+        "enable_order_combination": True,
+        "enable_single_access_tokens": True,
+        # Users
+        "default_user_type": "client",
+    }
+}
+
+
+def get_store_config() -> dict:
+    """
+    Get configuration for current store mode.
+    
+    Usage:
+        from config import get_store_config
+        config = get_store_config()
+        if config["require_auth_for_catalog"]:
+            # require authentication
+    """
+    if STORE_MODE not in STORE_CONFIG:
+        raise ValueError(f"Invalid STORE_MODE: {STORE_MODE}. Must be 'wholesale' or 'retail'")
+    return STORE_CONFIG[STORE_MODE]
+
+
+# Convenience flags for quick checks
+IS_WHOLESALE = STORE_MODE == "wholesale"
+IS_RETAIL = STORE_MODE == "retail"
+
+# Log store mode on startup
+logger.info(f"Store mode: {STORE_MODE} ({get_store_config()['name']})")
