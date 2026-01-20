@@ -213,6 +213,10 @@ def register_user(user: UserCreate, db: Session):
         if existing:
             raise HTTPException(status_code=400, detail="WhatsApp phone already registered")
 
+    # Determine user_type: use provided value or default from STORE_CONFIG
+    config = get_store_config()
+    user_type = user.user_type if user.user_type else config["default_user_type"]
+    
     hashed = get_password_hash(user.password)
     new_user = User(
         first_name=user.first_name,
@@ -221,7 +225,7 @@ def register_user(user: UserCreate, db: Session):
         whatsapp_phone=user.whatsapp_phone,
         email=user.email,
         birthdate=user.birthdate,
-        user_type=user.user_type,
+        user_type=user_type,
         registration_complete=True,
         hashed_password=hashed,
         password_last_updated=datetime.utcnow(),
@@ -229,7 +233,26 @@ def register_user(user: UserCreate, db: Session):
     )
     db.add(new_user)
     db.commit()
-    return {"msg": "User created successfully"}
+    db.refresh(new_user)
+    
+    # Generate access token so user is logged in immediately
+    identifier = new_user.email or new_user.phone or new_user.whatsapp_phone
+    access_token = create_access_token(data={"sub": identifier}, expires_delta=timedelta(days=365))
+    
+    return {
+        "access_token": access_token,
+        "token_type": "bearer",
+        "user": {
+            "id": new_user.id,
+            "first_name": new_user.first_name,
+            "last_name": new_user.last_name,
+            "email": new_user.email,
+            "phone": new_user.phone,
+            "whatsapp_phone": new_user.whatsapp_phone,
+            "user_type": new_user.user_type,
+            "registration_complete": new_user.registration_complete
+        }
+    }
 
 def update_user_profile(user_id: int, updates: UserUpdate, db: Session):
     user = db.query(User).filter(User.id == user_id).first()

@@ -12,7 +12,15 @@ router = APIRouter()
 @router.post(
     "/register",
     summary="Register new user",
-    description="Creates a new user account with email, phone, and password.",
+    description="""
+    Creates a new user account with email, phone, and password.
+    Returns access token so user is logged in immediately after registration.
+    
+    **Note:** `user_type` is optional. If not provided, defaults to:
+    - `stylist` in wholesale mode
+    - `client` in retail mode
+    """,
+    response_model=LoginResponse,
     status_code=201
 )
 def register(user: UserCreate, db: Session = Depends(get_db)):
@@ -61,6 +69,32 @@ def forgot_password(email: str = Body(..., embed=True), db: Session = Depends(ge
 )
 def reset_password(data: ResetPasswordSchema, db: Session = Depends(get_db)):
     return auth_service.reset_password(data, db)
+
+@router.get(
+    "/me",
+    summary="Get current user",
+    description="Returns the authenticated user's data. Use this to verify token validity and get user info.",
+    response_model=UserOut
+)
+def get_me(
+    current_user: User = Depends(auth_service.get_current_user),
+):
+    return {
+        "id": current_user.id,
+        "first_name": current_user.first_name,
+        "last_name": current_user.last_name,
+        "phone": current_user.phone,
+        "whatsapp_phone": current_user.whatsapp_phone,
+        "email": current_user.email,
+        "birthdate": current_user.birthdate,
+        "user_type": current_user.user_type,
+        "registration_complete": current_user.registration_complete,
+        "created_at": current_user.created_at,
+        "has_password": current_user.hashed_password is not None and len(current_user.hashed_password) > 0,
+        "password_requires_update": current_user.password_requires_update or False,
+        "password_last_updated": current_user.password_last_updated,
+    }
+
 
 @router.get(
     "/users/{user_id}",

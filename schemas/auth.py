@@ -11,10 +11,11 @@ class BaseUser(BaseModel):
     whatsapp_phone: Optional[str] = None
     email: EmailStr
     birthdate: Optional[date] = None
-    user_type: Literal["client", "stylist"]
+    user_type: Optional[Literal["client", "stylist"]] = None  # Optional - backend assigns based on STORE_MODE
 
 class UserCreate(BaseUser):
     password: str
+    # Note: user_type is optional. If not provided, backend uses default from STORE_CONFIG
 
 class UserUpdate(BaseModel):
     first_name: Optional[str] = None

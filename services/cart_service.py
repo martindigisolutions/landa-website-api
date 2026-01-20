@@ -236,9 +236,10 @@ def _build_cart_response(cart: Cart, db: Session, lang: str = "es") -> CartRespo
             # If shipping calculation fails, continue with 0
             pass
     
-    # Get order limits from settings
+    # Get order limits from settings (managed via dashboard)
+    # Owner configures min/max from dashboard - same logic for both modes
     settings_service = SettingsService(db)
-    min_order_amount = settings_service.get_setting_as_float("min_order_amount", 50.0)
+    min_order_amount = settings_service.get_setting_as_float("min_order_amount", 0)  # Default 0 = no minimum
     max_order_amount = settings_service.get_setting_as_float("max_order_amount", 2000.0)
     
     # Calculate tax using saved shipping address if available

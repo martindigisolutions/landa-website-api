@@ -97,7 +97,11 @@ def update_payment_method(
     payment_method: str
 ) -> UpdatePaymentMethodResponse:
     """Update payment method in cart"""
-    valid_methods = ["stripe", "zelle", "cashapp", "venmo"]
+    from config import get_store_config
+    
+    # Get valid payment methods from store config
+    store_config = get_store_config()
+    valid_methods = store_config.get("payment_methods", ["stripe"])
     
     if payment_method.lower() not in valid_methods:
         return UpdatePaymentMethodResponse(
@@ -140,6 +144,17 @@ def create_lock(
             success=False,
             error="empty_cart",
             message="Cart is empty"
+        )
+    
+    # Validate pickup availability based on store mode
+    from config import get_store_config
+    store_config = get_store_config()
+    
+    if cart.is_pickup and not store_config.get("allow_pickup", True):
+        return LockCartResponse(
+            success=False,
+            error="pickup_not_available",
+            message="Store pickup is not available. Please select delivery."
         )
     
     # Validate shipping address (for delivery) or pickup flag
