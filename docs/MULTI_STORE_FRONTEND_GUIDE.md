@@ -24,7 +24,7 @@ La API ahora soporta dos modos de operación controlados por la variable `STORE_
 | **Ver catálogo/precios** | 🔒 Requiere login | 🌐 Público |
 | **Agregar al carrito** | 🔒 Requiere login | ✅ Guest puede (pendiente F3) |
 | **Checkout** | 🔒 Requiere login | 🔒 Requiere login (por ahora) |
-| **Métodos de pago** | Stripe + Zelle | Solo Stripe |
+| **Métodos de pago** | Stripe, Zelle, Cash App, Venmo | Solo Stripe |
 | **Mínimo de orden** | $100 | Sin mínimo |
 | **Pickup en tienda** | ✅ Disponible | ❌ Solo envío |
 | **Tipo de usuario** | `stylist` | `client` |

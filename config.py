@@ -79,7 +79,7 @@ STORE_CONFIG = {
         "require_auth_for_checkout": True,   # Must login to checkout
         # Order settings
         "min_order_amount": 100,             # Minimum order amount in USD
-        "payment_methods": ["stripe", "zelle"],
+        "payment_methods": ["stripe", "zelle", "cashapp", "venmo"],
         "allow_pickup": True,                # Store pickup available
         # Features
         "enable_order_combination": True,
